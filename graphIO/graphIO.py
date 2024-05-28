@@ -1,7 +1,5 @@
 import numpy as np
 import os
-import json
-import pandas as pd
 from tqdm import tqdm
 import torch
 
@@ -44,7 +42,7 @@ def read_adj_matrices_from_directory(directory, include_string='', as_tensor=Fal
     # Iterate over files in the directory with a progress bar
     for filename in tqdm(files, desc="Reading adjacency matrices"):
         filepath = os.path.join(directory, filename)
-        if include_string and include_string in filename:
+        if not include_string or include_string in filename:
             # Read the adjacency matrix from the file
             adj_matrix = read_adj_matrix_from_file(filepath, as_tensor=as_tensor)
             # Store the adjacency matrix in the dictionary
@@ -112,6 +110,83 @@ def read_ppmi_data(ppmi_directory, method='new', as_tensor=False):
                 hierarchical_dict[class_name][record_name] = adj_matrix
     
     return hierarchical_dict
+
+
+def read_ad_curv_data(ad_directory, as_tensor=False):
+    control_matrices = read_adj_matrices_from_directory(f'{ad_directory}/CN-50/new/', include_string='', as_tensor=as_tensor)
+    ad_matrices = read_adj_matrices_from_directory(f'{ad_directory}/AD-50/new/', include_string='', as_tensor=as_tensor)
+    return center_matrices(np.array(list(control_matrices.values()))), center_matrices(np.array(list(ad_matrices.values())))
+
+def read_ad_adj_data(ad_directory, as_tensor=False):
+    control_matrices = read_adj_matrices_from_directory(f'{ad_directory}/CN-50/', include_string='', as_tensor=as_tensor)
+    ad_matrices = read_adj_matrices_from_directory(f'{ad_directory}/AD-50/', include_string='', as_tensor=as_tensor)
+    return center_matrices(np.array(list(control_matrices.values()))), center_matrices(np.array(list(ad_matrices.values())))
+
+
+def center_matrices(matrices):
+    return standardize_matrices(normalize_matrices(matrices))
+
+def normalize_matrices(matrices):
+    """
+    Normalize a set of matrices to the range [0, 1].
+    
+    Parameters:
+    matrices (np.ndarray): A numpy array of shape (n, x, x) where n is the number of samples
+                           and x is the dimension length of the square matrices.
+
+    Returns:
+    np.ndarray: Normalized matrices.
+    """
+    min_val = np.min(matrices)
+    max_val = np.max(matrices)
+    normalized = (matrices - min_val) / (max_val - min_val)
+    return normalized
+
+def standardize_matrices(matrices):
+    """
+    Standardize a set of matrices to have zero mean and unit variance.
+    
+    Parameters:
+    matrices (np.ndarray): A numpy array of shape (n, x, x) where n is the number of samples
+                           and x is the dimension length of the square matrices.
+
+    Returns:
+    np.ndarray: Standardized matrices.
+    """
+    mean_val = np.mean(matrices)
+    std_dev = np.std(matrices)
+    standardized = (matrices - mean_val) / std_dev
+    return standardized
+
+def analyze_matrices(matrices):
+    """
+    Analyzes a set of square matrices and prints useful statistics for the entire set.
+
+    Parameters:
+    matrices (np.ndarray): A numpy array of shape (n, x, x) where n is the number of samples
+                           and x is the dimension length of the square matrices.
+
+    Returns:
+    None
+    """
+    n, x, _ = matrices.shape
+    
+    # Flatten the matrices to a single array
+    all_values = matrices.flatten()
+    
+    # Calculate statistics
+    mean_value = np.mean(all_values)
+    std_dev = np.std(all_values)
+    max_value = np.max(all_values)
+    min_value = np.min(all_values)
+    
+    # Print the results
+    print("Statistics for the entire set of matrices:")
+    print(f"Mean: {mean_value}")
+    print(f"Standard Deviation: {std_dev}")
+    print(f"Maximum Value: {max_value}")
+    print(f"Minimum Value: {min_value}")
+    print("-" * 40)
 
 
 

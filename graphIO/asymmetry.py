@@ -21,13 +21,15 @@ def calculate_inter_hemispheric_asymmetry_vector(matrix, method='abs_diff', atla
         raise ValueError('Invalid atlas')
 
 
-def calculate_inter_hemispheric_asymmetry_vector_aal116(matrix, method='abs_diff'):
+
+def calculate_inter_hemispheric_asymmetry_vector_aal116(matrix, method='abs_diff', epsilon=1e-10):
     """
     Calculates the inter-hemispheric asymmetry vector for a given matrix.
 
     Parameters:
     - matrix (numpy.ndarray): The input matrix for which the asymmetry vector needs to be calculated.
     - method (str): The method used to calculate the asymmetry vector. Default is 'abs_diff'.
+    - epsilon (float): A small value added to denominators to prevent division by zero.
 
     Returns:
     - ai (list): The calculated inter-hemispheric asymmetry vector.
@@ -47,15 +49,15 @@ def calculate_inter_hemispheric_asymmetry_vector_aal116(matrix, method='abs_diff
         if method == 'abs_diff':
             ai.append(np.abs(means[i] - means[i+1]))
         elif method == 'ai':
-            ai.append((means[i] - means[i+1]) / (means[i] + means[i+1]))
+            ai.append((means[i] - means[i+1]) / (means[i] + means[i+1] + epsilon))
         elif method == 'sq_diff':
             ai.append((means[i] - means[i+1])**2)
         elif method == 'log_ratio':
-            ai.append(np.log(means[i] / means[i+1]))
+            ai.append(np.log((means[i] + epsilon) / (means[i+1] + epsilon)))
         elif method == 'perc_diff':
-            ai.append((means[i] - means[i+1]) / ((means[i] + means[i+1]) / 2) * 100)
+            ai.append((means[i] - means[i+1]) / ((means[i] + means[i+1] + epsilon) / 2) * 100)
         elif method == 'ratio':
-            ai.append(means[i] / means[i+1])
+            ai.append((means[i] + epsilon) / (means[i+1] + epsilon))
         elif method == 'smape':
-            ai.append(100 * (np.abs(means[i] - means[i+1]) / ((np.abs(means[i]) + np.abs(means[i+1])) / 2)))
+            ai.append(100 * (np.abs(means[i] - means[i+1]) / ((np.abs(means[i]) + np.abs(means[i+1]) + epsilon) / 2)))
     return ai
