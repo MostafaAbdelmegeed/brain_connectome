@@ -82,34 +82,61 @@ def read_ppmi_data(ppmi_directory, method='new', as_tensor=False):
     :return: A dictionary with class names, record names, and their corresponding adjacency matrices.
     """
     hierarchical_dict = {}
-    
     # Get a list of subdirectories in the parent directory
     subdirectories = [d for d in os.listdir(ppmi_directory) if os.path.isdir(os.path.join(ppmi_directory, d))]
-    
     # Iterate over each subdirectory
     for subdirectory in tqdm(subdirectories, desc="Processing directories"):
         class_name = parse_class_name(subdirectory)
         subdirectory_path = os.path.join(ppmi_directory, subdirectory)
-        
         # Get a list of files in the subdirectory
         files = [f for f in os.listdir(subdirectory_path) if os.path.isfile(os.path.join(subdirectory_path, f))]
-        
         for file_name in files:
             if f'_{method}_' in file_name:
                 record_name = parse_record_name(file_name)
                 file_path = os.path.join(subdirectory_path, file_name)
-                
                 # Read the adjacency matrix from the file
                 adj_matrix = read_adj_matrix_from_file(file_path, as_tensor=as_tensor)
-                
                 # Initialize the class dictionary if it does not exist
                 if class_name not in hierarchical_dict:
                     hierarchical_dict[class_name] = {}
-                
                 # Add the record and its adjacency matrix to the class dictionary
                 hierarchical_dict[class_name][record_name] = adj_matrix
-    
     return hierarchical_dict
+
+
+def read_ppmi_data_as_tensors(ppmi_directory, method='new'):
+    """
+    Reads adjacency matrices from files in a directory structure and organizes them in a hierarchical dictionary.
+    The adjacency matrices are returned as PyTorch tensors.
+    
+    :param ppmi_directory: Path to the parent directory containing the subdirectories.
+    :return: A dictionary with class names, record names, and their corresponding adjacency matrices as tensors.
+    """
+    classname_to_label = {'control': 0, 'prodromal': 1, 'patient': 2, 'swedd': 3}
+    subdirectories = [d for d in os.listdir(ppmi_directory) if os.path.isdir(os.path.join(ppmi_directory, d))]
+    # Iterate over each subdirectory
+    data = []
+    class_labels = []
+    id_labels = []
+    for subdirectory in tqdm(subdirectories, desc="Processing directories"):
+        class_name = parse_class_name(subdirectory)
+        class_label = classname_to_label[class_name[4:]]
+        subdirectory_path = os.path.join(ppmi_directory, subdirectory)
+        # Get a list of files in the subdirectory
+        files = [f for f in os.listdir(subdirectory_path) if os.path.isfile(os.path.join(subdirectory_path, f))]
+        for file_name in files:
+            if f'_{method}_' in file_name:
+                record_name = parse_record_name(file_name)
+                record_id = int(''.join(filter(str.isdigit, record_name)))
+                file_path = os.path.join(subdirectory_path, file_name)
+                # Read the adjacency matrix from the file
+                adj_matrix = read_adj_matrix_from_file(file_path, as_tensor=True)
+                # Initialize the class dictionary if it does not exist
+                data.append(adj_matrix)
+                class_labels.append(class_label)
+                id_labels.append(record_id)
+    return {'data': torch.stack(data), 'class_label': torch.tensor(class_labels, dtype=torch.int64), 'id': torch.tensor(id_labels, dtype=torch.int64)}
+    
 
 
 def read_ad_curv_data(ad_directory, as_tensor=False):
@@ -187,6 +214,10 @@ def analyze_matrices(matrices):
     print(f"Maximum Value: {max_value}")
     print(f"Minimum Value: {min_value}")
     print("-" * 40)
+
+
+def is_symmetric(matrix, tol=1e-8):
+    return np.allclose(matrix, matrix.T, atol=tol)
 
 
 
