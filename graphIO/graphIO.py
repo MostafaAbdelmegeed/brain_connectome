@@ -2,6 +2,7 @@ import numpy as np
 import os
 from tqdm import tqdm
 import torch
+from scipy.io import loadmat
 
 
 def write_adj_matrix(adj_matrix_file_path, adj_matrix):
@@ -13,7 +14,7 @@ def write_adj_matrix(adj_matrix_file_path, adj_matrix):
     """
     np.savetxt(adj_matrix_file_path, adj_matrix, fmt='%f')
 
-def read_adj_matrix_from_file(file_path, as_tensor=False):
+def read_adj_matrix_from_file(file_path, key='data', as_tensor=False):
     """
     Reads the adjacency matrix from a single file.
 
@@ -21,7 +22,14 @@ def read_adj_matrix_from_file(file_path, as_tensor=False):
     :param as_tensor: Boolean flag to return the matrix as a tensor if True.
     :return: The adjacency matrix as a NumPy array or tensor.
     """
-    adj_matrix = np.nan_to_num(np.loadtxt(file_path))
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"File not found: {file_path}")
+    if not os.path.isfile(file_path):
+        raise ValueError(f"Path is not a file: {file_path}")
+    if os.path.splitext(file_path)[1] == '.txt':
+        adj_matrix = np.nan_to_num(np.loadtxt(file_path))
+    elif os.path.splitext(file_path)[1] == '.mat':
+        adj_matrix = np.nan_to_num(loadmat(file_path)[key])
     if as_tensor:
         adj_matrix = torch.tensor(adj_matrix)
     return adj_matrix
@@ -104,7 +112,7 @@ def read_ppmi_data(ppmi_directory, method='new', as_tensor=False):
     return hierarchical_dict
 
 
-def read_ppmi_data_as_tensors(ppmi_directory, method='new'):
+def read_ppmi_data_as_tensors(ppmi_directory, atlas='AAL116', method='new'):
     """
     Reads adjacency matrices from files in a directory structure and organizes them in a hierarchical dictionary.
     The adjacency matrices are returned as PyTorch tensors.
@@ -125,7 +133,7 @@ def read_ppmi_data_as_tensors(ppmi_directory, method='new'):
         # Get a list of files in the subdirectory
         files = [f for f in os.listdir(subdirectory_path) if os.path.isfile(os.path.join(subdirectory_path, f))]
         for file_name in files:
-            if f'_{method}_' in file_name:
+            if f'_{method}_' in file_name and f'_{atlas}_' in file_name:
                 record_name = parse_record_name(file_name)
                 record_id = int(''.join(filter(str.isdigit, record_name)))
                 file_path = os.path.join(subdirectory_path, file_name)
