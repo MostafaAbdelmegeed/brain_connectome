@@ -27,6 +27,7 @@ class MultiHeadGATLayerWithEdgeFeatures(nn.Module):
         Wh = Wh.view(-1, self.heads, self.out_features)  # Wh.shape: (N, heads, out_features)
         
         a_input = self._prepare_attentional_mechanism_input(Wh, edge_index, edge_attr)
+
         e = self.leakyrelu(torch.einsum('ehd,hd->eh', a_input, self.a))  # e.shape: (E, heads)
         
         attention = F.softmax(e, dim=1)
