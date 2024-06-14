@@ -16,20 +16,21 @@ import torch.nn as nn
 from tqdm import tqdm
 import time
 import argparse
+from torch.utils.tensorboard import SummaryWriter
 
 
 # Argument parsing
 parser = argparse.ArgumentParser(description='Brain Connectivity Analysis with GAT')
-parser.add_argument('--suppress_threshold', type=float, default=0.3, help='Threshold to suppress interhemispheric connectivity')
-parser.add_argument('--attention_heads', type=int, default=4, help='Number of attention heads')
-parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
+parser.add_argument('--suppress_threshold', type=float, default=0.3, help='Threshold to suppress low connectivity')
+parser.add_argument('--attention_heads', type=int, default=8, help='Number of attention heads')
+parser.add_argument('--epochs', type=int, default=30, help='Number of epochs')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate')
 parser.add_argument('--folds', type=int, default=5, help='Number of folds for cross-validation')
 parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
 parser.add_argument('--drop_out', type=float, default=0.6, help='Dropout rate')
 parser.add_argument('--alpha', type=float, default=0.2, help='Alpha value for leaky ReLU')
-parser.add_argument('--layers', type=int, default=2, help='Number of layers in the model')
-parser.add_argument('--hidden', type=int, default=32, help='Number of hidden features')
+parser.add_argument('--layers', type=int, default=3, help='Number of layers in the model')
+parser.add_argument('--hidden', type=int, default=128, help='Number of hidden features')
 parser.add_argument('--out_features', type=int, default=8, help='Number of output features')
 parser.add_argument('--n_classes', type=int, default=4, help='Number of classes')
 parser.add_argument('--pth_dir', type=str, default='data/ppmi_w_curv.pth', help='Dataset Directory')
@@ -39,7 +40,8 @@ parser.add_argument('--use_curvature', action='store_true', help='Uses curvature
 parser.add_argument('--center_matrices', action='store_true', help='Center matrices')
 parser.add_argument('--normalize_matrices', action='store_true', help='Normalize matrices')
 parser.add_argument('--standardize_matrices', action='store_true', help='Standardize matrices')
-
+parser.add_argument('--gpu', type=int, default=0, help='GPU index to use')
+parser.add_argument('--attn_on_interhemispheric', action='store_true', help='Use attention mechanism on interhemispheric edges')
 args = parser.parse_args()
 
 # CONSTANTS
@@ -259,20 +261,36 @@ labels = torch.tensor(connectivity_labels, dtype=torch.long)
 data_loaders = create_data_loaders(graph_data_list, labels, n_splits=FOLDS, batch_size=BATCH_SIZE)
 
 # Check if CUDA is available
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+if torch.cuda.is_available():
+    device = torch.device(f'cuda:{args.gpu}')
+else:
+    device = torch.device('cpu')
+
+print(f'Using device: {device}')
+
+# Initialize TensorBoard writer
+writer = SummaryWriter(log_dir=f'runs/models/GAT_{int(args.suppress_ihc)}{int(args.use_asym)}{int(args.use_curvature)}_{LAYERS}_{HIDDEN}_{ATTENTION_HEADS}.pth')
 
 def train_model(model, train_loader, optimizer, criterion, device):
     model.train()
     total_loss = 0
+    correct = 0
     for data in tqdm(train_loader, desc='Training', leave=False):
         data = data.to(device)
         optimizer.zero_grad()
-        out = model(data)
+        out = model(data, edge_type_filter=1 if args.attn_on_interhemispheric else None)
         loss = criterion(out, data.y.view(-1))  # Flatten the target labels
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * data.num_graphs
-    return total_loss / len(train_loader.dataset)
+        
+        # Calculate accuracy
+        pred = out.argmax(dim=1)
+        correct += pred.eq(data.y.view(-1)).sum().item()
+    
+    avg_loss = total_loss / len(train_loader.dataset)
+    accuracy = correct / len(train_loader.dataset)
+    return avg_loss, accuracy
 
 def test_model(model, test_loader, criterion, device):
     model.eval()
@@ -281,12 +299,17 @@ def test_model(model, test_loader, criterion, device):
     with torch.no_grad():
         for data in tqdm(test_loader, desc='Testing', leave=False):
             data = data.to(device)
-            out = model(data)
+            out = model(data, edge_type_filter=1 if args.attn_on_interhemispheric else None)
             loss = criterion(out, data.y.view(-1))  # Flatten the target labels
             total_loss += loss.item() * data.num_graphs
+            
+            # Calculate accuracy
             pred = out.argmax(dim=1)
             correct += pred.eq(data.y.view(-1)).sum().item()
-    return total_loss / len(test_loader.dataset), correct / len(test_loader.dataset)
+    
+    avg_loss = total_loss / len(test_loader.dataset)
+    accuracy = correct / len(test_loader.dataset)
+    return avg_loss, accuracy
 
 # Training with Cross-Validation
 for fold, (train_loader, test_loader) in enumerate(data_loaders):
@@ -309,10 +332,17 @@ for fold, (train_loader, test_loader) in enumerate(data_loaders):
 
     for epoch in range(EPOCHS):  # Adjust the number of epochs as needed
         start_time = time.time()
-        train_loss = train_model(model, train_loader, optimizer, criterion, device)
+        train_loss, train_acc = train_model(model, train_loader, optimizer, criterion, device)
         test_loss, test_acc = test_model(model, test_loader, criterion, device)
         elapsed_time = time.time() - start_time
-        print(f'[Fold {fold + 1}][Epoch {epoch + 1}] Train Loss: {train_loss:.4f} | Test Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f} | Time: {elapsed_time:.2f}s')
+        
+        # Log metrics to TensorBoard
+        writer.add_scalar(f'Fold_{fold+1}/Train_Loss', train_loss, epoch)
+        writer.add_scalar(f'Fold_{fold+1}/Train_Acc', train_acc, epoch)
+        writer.add_scalar(f'Fold_{fold+1}/Test_Loss', test_loss, epoch)
+        writer.add_scalar(f'Fold_{fold+1}/Test_Acc', test_acc, epoch)
+        
+        print(f'[Fold {fold + 1}][Epoch {epoch + 1}] Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f} | Test Loss: {test_loss:.4f} | Test Acc: {test_acc:.4f} | Time: {elapsed_time:.2f}s')
         
         # Save the best model
         if test_acc > best_acc:
@@ -320,8 +350,13 @@ for fold, (train_loader, test_loader) in enumerate(data_loaders):
             best_model_wts = model.state_dict()
     
     # Save the best model for this fold
+    model_save_path = f'models/GAT_{int(args.suppress_ihc)}{int(args.use_curvature)}{int(args.use_asym)}_{LAYERS}_{HIDDEN}_{ATTENTION_HEADS}_{fold}.pth'
     torch.save({
         'model_state_dict': best_model_wts,
         'optimizer_state_dict': optimizer.state_dict(),
         'best_acc': best_acc
-    }, f'models/GAT{"_suppressed" if SUPPRESS_IHC else ""}_{LAYERS}_{HIDDEN}_{ATTENTION_HEADS}_{fold}.pth')
+    }, model_save_path)
+    print(f'Saved best model of fold {fold + 1} to {model_save_path}')
+
+# Close the TensorBoard writer
+writer.close()

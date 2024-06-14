@@ -22,9 +22,15 @@ class MultiHeadGATLayerWithEdgeFeatures(nn.Module):
         
         self.leakyrelu = nn.LeakyReLU(self.alpha)
 
-    def forward(self, h, edge_index, edge_attr):
+    def forward(self, h, edge_index, edge_attr, edge_type_filter=None):
         Wh = torch.mm(h, self.W)  # h.shape: (N, in_features), Wh.shape: (N, heads * out_features)
         Wh = Wh.view(-1, self.heads, self.out_features)  # Wh.shape: (N, heads, out_features)
+
+        if edge_type_filter is not None:
+            # Filter edges based on edge_type_filter
+            mask = (edge_attr[:, edge_type_filter] > 0)
+            edge_index = edge_index[:, mask]
+            edge_attr = edge_attr[mask]
         
         a_input = self._prepare_attentional_mechanism_input(Wh, edge_index, edge_attr)
 
@@ -67,11 +73,11 @@ class GATWithEdgeFeatures(nn.Module):
         
         self.classifier = nn.Linear(out_features, num_classes)
 
-    def forward(self, data):
+    def forward(self, data, edge_type_filter=None):
         x, edge_index, edge_attr, batch = data.x, data.edge_index, data.edge_attr, data.batch
         
         for layer in self.layers:
-            x = layer(x, edge_index, edge_attr)
+            x = layer(x, edge_index, edge_attr, edge_type_filter=edge_type_filter)
         
         # Perform global mean pooling
         x = global_mean_pool(x, batch)
