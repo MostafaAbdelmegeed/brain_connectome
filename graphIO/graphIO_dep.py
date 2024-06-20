@@ -26,10 +26,10 @@ def read_adj_matrix_from_file(file_path, key='data', as_tensor=False):
         raise FileNotFoundError(f"File not found: {file_path}")
     if not os.path.isfile(file_path):
         raise ValueError(f"Path is not a file: {file_path}")
-    if os.path.splitext(file_path)[1] == '.txt':
-        adj_matrix = np.nan_to_num(np.loadtxt(file_path))
-    elif os.path.splitext(file_path)[1] == '.mat':
+    if os.path.splitext(file_path)[1] == '.mat':
         adj_matrix = np.nan_to_num(loadmat(file_path)[key])
+    else:
+        adj_matrix = np.nan_to_num(np.loadtxt(file_path))
     if as_tensor:
         adj_matrix = torch.tensor(adj_matrix)
     return adj_matrix

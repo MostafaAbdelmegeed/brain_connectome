@@ -98,7 +98,6 @@ def standardize_matrices(matrices):
     return standardized
 
 def calculate_inter_hemispheric_asymmetry_vector_aal116(matrix, method='abs_diff', epsilon=1e-10):
-
     means = np.mean(matrix, axis=1)
     ai = []
     for i in range(0, len(means)-1, 2):
