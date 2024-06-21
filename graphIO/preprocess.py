@@ -8,6 +8,7 @@ from sklearn.model_selection import StratifiedKFold
 from .math import *
 
 
+
 def center_matrices(matrices):
     return standardize_matrices(normalize_matrices(matrices))
 
@@ -39,18 +40,14 @@ def construct_graph(matrix, threshold=0.3):
 def convert_to_pyg_data(G, num_node_features):
     # Convert edge list to tensor
     edge_index = torch.tensor(list(G.edges), dtype=torch.long).t().contiguous()
-    
     # Convert edge attributes to tensor
     edge_attr = torch.tensor([[G[u][v]['weight']] for u, v in G.edges], dtype=torch.float).view(-1, 1)
-
     # Create node features based on indices
     num_nodes = G.number_of_nodes()
-    node_features = np.eye(num_nodes, num_node_features)
+    node_features = np.ones((num_nodes, num_nodes))
     x = torch.tensor(node_features, dtype=torch.float)
-    
     # Create PyTorch Geometric data object
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
-    
     return data
 
 def create_graphs(connectivity_matrices):

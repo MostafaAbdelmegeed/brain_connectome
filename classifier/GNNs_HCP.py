@@ -12,11 +12,12 @@ from torch_geometric.nn import GCNConv, GINConv, GATConv, global_mean_pool, glob
 from torch.nn import Linear
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from torch.utils.data import random_split
+from tqdm import tqdm
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu', type=str, default='3')
+    parser.add_argument('--gpu', type=str, default='0')
     parser.add_argument('--model', type=str, default='GCN', choices=['GCN', 'GIN', 'GAT'])
     parser.add_argument('--hidden_channels', type=int, default=8)
     parser.add_argument('--epochs', type=int, default=200)
@@ -32,17 +33,15 @@ def get_device(gpu_id):
     return torch.device(f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu')
 
 def load_data():
-    train_dataset = torch.load('./data/LR_dataset.pth')
-    test_dataset = torch.load('./data/RL_dataset.pth')
+    dataset = torch.load('data/ppmi_raw.pth')
     # train_dataset = Dataset_graph(./data/LR_graph')
     # test_dataset = Dataset_graph('./data/RL_graph')
-    val_set, test_set = random_split(test_dataset, [2972, 4458])
-    
-    batchsize = 64
-    train_loader = DataLoader(train_dataset, batch_size=batchsize, shuffle=True, num_workers=8)
+    train_set, val_set, test_set = random_split(dataset, [0.8, 0.1, 0.1])
+    print(f"Train set: {len(train_set)}, Val set: {len(val_set)}, Test set: {len(test_set)}")
+    batchsize = 1
+    train_loader = DataLoader(train_set, batch_size=batchsize, shuffle=True, num_workers=8)
     val_loader = DataLoader(val_set, batch_size=batchsize, shuffle=True, num_workers=8)
     test_loader = DataLoader(test_set, batch_size=batchsize, shuffle=True, num_workers=8)
-    
     return train_loader, val_loader, test_loader
 
 class GCN(torch.nn.Module):
@@ -114,18 +113,18 @@ class GAT(torch.nn.Module):
 
 def get_model(model_name, hidden_channels):
     if model_name == 'GCN':
-        return GCN(in_feats=360, hidden_size=hidden_channels, out_feats=7)
+        return GCN(in_feats=116, hidden_size=hidden_channels, out_feats=4)
     elif model_name == 'GIN':
-        return GIN(in_channels=360, hidden_channels=hidden_channels, out_channels=7, num_layers=2)
+        return GIN(in_channels=116, hidden_channels=hidden_channels, out_channels=4, num_layers=2)
     elif model_name == 'GAT':
-        return GAT(in_channels=360, hidden_channels=hidden_channels, out_channels=7, heads=2)
+        return GAT(in_channels=116, hidden_channels=hidden_channels, out_channels=4, heads=2)
     else:
         raise argparse.ArgumentTypeError(f"Unsupported model. Choose from GCN, GIN, GAT.")
 
 def train(model, loader, criterion, optimizer, device):
     model.train()
     total_loss = 0
-    for data in loader:
+    for data in tqdm(loader, desc="Training Batches"):
         data = data.to(device)
         optimizer.zero_grad()
         out = model(data)
@@ -141,7 +140,7 @@ def test(model, loader, device):
     preds = []
     gts = []
     with torch.no_grad():
-        for data in loader:
+        for data in tqdm(loader, desc="Testing Batches"):
             data = data.to(device)
             out = model(data)
             pred = out.argmax(dim=-1)
@@ -151,9 +150,9 @@ def test(model, loader, device):
     preds = np.concatenate(preds, axis=0)
     gts = np.concatenate(gts, axis=0)
     accuracy = accuracy_score(gts, preds)
-    precision = precision_score(gts, preds, average='weighted')
-    recall = recall_score(gts, preds, average='weighted')
-    f1 = f1_score(gts, preds, average='weighted')
+    precision = precision_score(gts, preds, average='weighted', zero_division=0)
+    recall = recall_score(gts, preds, average='weighted', zero_division=0)
+    f1 = f1_score(gts, preds, average='weighted', zero_division=0)
     return accuracy, precision, recall, f1
 
 def main():
@@ -169,13 +168,18 @@ def main():
     criterion = nn.CrossEntropyLoss()
     
     best_val_acc = 0
-    for epoch in range(1, args.epochs + 1):
+    for epoch in tqdm(range(1, args.epochs + 1), desc="Training Epochs"):
         loss = train(model, train_loader, criterion, optimizer, device)
         val_acc, _, _, _ = test(model, val_loader, device)
         test_acc, pre, rec, f1 = test(model, test_loader, device)
+        
         if val_acc > best_val_acc:
             best_val_acc = val_acc
+        
         print(f'Epoch: {epoch:03d}, best Acc: {best_val_acc:.4f}, Test Acc: {test_acc:.4f}, Loss: {loss:.4f}, pre: {pre:.4f}, rec: {rec:.4f}, f1: {f1:.4f}')
+
+
+# python classifier/GNNs_HCP.py --gpu 0 --model GCN --hidden_channels 8 --epochs 200
 
 if __name__ == "__main__":
     main()

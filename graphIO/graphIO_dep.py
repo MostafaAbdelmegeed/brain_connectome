@@ -143,7 +143,7 @@ def read_ppmi_data_as_tensors(ppmi_directory, atlas='AAL116', method='new'):
                 data.append(adj_matrix)
                 class_labels.append(class_label)
                 id_labels.append(record_id)
-    return {'data': torch.stack(data), 'class_label': torch.tensor(class_labels, dtype=torch.int64), 'id': torch.tensor(id_labels, dtype=torch.int64)}
+    return {'matrix': torch.stack(data), 'label': torch.tensor(class_labels, dtype=torch.int64), 'id': torch.tensor(id_labels, dtype=torch.int64)}
     
 
 

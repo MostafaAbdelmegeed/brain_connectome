@@ -1,7 +1,17 @@
-from torch_geometric.nn import GATConv, global_mean_pool
+import torch
+
+# Initialize CUDA
+torch.cuda.init()
+
+print("CUDA available:", torch.cuda.is_available())
+if torch.cuda.is_available():
+    print(f"Using device: {torch.cuda.get_device_name(0)}")
+else:
+    print("CUDA device not available. Using CPU.")
+
+from torch_geometric.nn import GCNConv, global_mean_pool
 from torch.nn import Linear
 import torch.nn.functional as F
-import torch
 import sys
 from pathlib import Path
 import numpy as np
@@ -22,32 +32,64 @@ import torch.nn as nn
 import torch.optim as optim
 import time
 
-class GAT(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, heads, num_layers):
-        super().__init__()
-        self.num_layers = num_layers
-        self.convs = torch.nn.ModuleList()
-        # Input layer
-        self.convs.append(GATConv(in_channels, hidden_channels, heads, dropout=0.6))
-        # Hidden layers
-        for _ in range(num_layers - 2):
-            self.convs.append(GATConv(hidden_channels * heads, hidden_channels, heads, dropout=0.6))
-        # Output layer
-        self.convs.append(GATConv(hidden_channels * heads, hidden_channels, heads=1, concat=False, dropout=0.6))
-        # Linear layers
-        self.lin1 = Linear(hidden_channels, in_channels)
-        self.lin2 = Linear(in_channels, out_channels)
+def initialize_weights(m):
+    if isinstance(m, GCNConv):
+        nn.init.xavier_uniform_(m.lin.weight.data)
+        if m.lin.bias is not None:
+            nn.init.zeros_(m.lin.bias.data)
+    elif isinstance(m, Linear):
+        nn.init.xavier_uniform_(m.weight.data)
+        if m.bias is not None:
+            nn.init.zeros_(m.bias.data)
+
+class GCN(torch.nn.Module):
+    def __init__(self, in_feats, hidden_size, out_feats):
+        super(GCN, self).__init__()
+        self.conv1 = GCNConv(in_feats, hidden_size)
+        self.conv2 = GCNConv(hidden_size, hidden_size)
+        self.lin1 = Linear(hidden_size, in_feats)
+        self.lin2 = Linear(in_feats, out_feats)
+        self.apply(initialize_weights)  # Apply the initialization
 
     def forward(self, data):
         x, edge_index, edge_weight = data.x, data.edge_index, data.edge_attr
-        for conv in self.convs:
-            x = F.dropout(x, p=0.6, training=self.training)
-            x = F.elu(conv(x, edge_index))
-
+        
+        print("Input x:", x)
+        print("Input edge_index:", edge_index)
+        print("Input edge_weight:", edge_weight)
+        
+        x = self.conv1(x, edge_index, edge_weight)
+        print("After conv1 x:", x)
+        assert not torch.isnan(x).any(), "After conv1 x contains NaNs"
+        
+        x = F.relu(x)
+        print("After relu1 x:", x)
+        assert not torch.isnan(x).any(), "After relu1 x contains NaNs"
+        
+        x = self.conv2(x, edge_index, edge_weight)
+        print("After conv2 x:", x)
+        assert not torch.isnan(x).any(), "After conv2 x contains NaNs"
+        
+        x = F.relu(x)
+        print("After relu2 x:", x)
+        assert not torch.isnan(x).any(), "After relu2 x contains NaNs"
+        
         x = global_mean_pool(x, data.batch)
+        print("After global_mean_pool x:", x)
+        assert not torch.isnan(x).any(), "After global_mean_pool x contains NaNs"
+        
         x = F.dropout(x, p=0.3, training=self.training)
+        print("After dropout x:", x)
+        assert not torch.isnan(x).any(), "After dropout x contains NaNs"
+        
         x = F.relu(self.lin1(x))
+        print("After lin1 x:", x)
+        assert not torch.isnan(x).any(), "After lin1 x contains NaNs"
+        
         x = self.lin2(x)
+        print("After lin2 x:", x)
+        assert not torch.isnan(x).any(), "After lin2 x contains NaNs"
+        
         return x
 
 def create_data_loaders(graphs, labels, n_splits=5, batch_size=32):
@@ -62,6 +104,17 @@ def create_data_loaders(graphs, labels, n_splits=5, batch_size=32):
         test_dataset = BrainConnectivityDataset(test_graphs, test_labels)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+        
+        # Check for NaNs in datasets
+        for data in train_loader:
+            assert not torch.isnan(data.x).any(), "Train loader contains NaNs"
+            assert not torch.isinf(data.x).any(), "Train loader contains Infs"
+            assert not torch.isnan(data.edge_index).any(), "Train loader edge_index contains NaNs"
+            assert not torch.isinf(data.edge_index).any(), "Train loader edge_index contains Infs"
+            if data.edge_attr is not None:
+                assert not torch.isnan(data.edge_attr).any(), "Train loader edge_attr contains NaNs"
+                assert not torch.isinf(data.edge_attr).any(), "Train loader edge_attr contains Infs"
+
         loaders.append((train_loader, test_loader))
     return loaders
 
@@ -73,8 +126,11 @@ def train_model(model, train_loader, optimizer, criterion, device):
         data = data.to(device)
         optimizer.zero_grad()
         out = model(data)
-        loss = criterion(out, data.y.view(-1))  # Flatten the target labels
+        loss = criterion(out, data.y.view(-1))
+        # Check for NaNs in the loss
         loss.backward()
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         total_loss += loss.item() * data.num_graphs
         # Calculate accuracy
@@ -101,18 +157,18 @@ def test_model(model, test_loader, criterion, device):
     accuracy = correct / len(test_loader.dataset)
     return avg_loss, accuracy
 
-# python classifier/baseline.py --dataset_path data/ppmi_corr_116.pth --in_channels 116 --hidden_channels 16 --out_channels 4 --heads 2 --num_layers 2 --device cuda --epochs 20 --learning_rate 0.01 --suppress_threshold 0.3 --folds 1 --batch_size 1
+
+# python classifier/baseline.py --dataset_path data/ppmi_corr_116.pth --in_channels 116 --hidden_channels 16 --out_channels 3 --device cuda --epochs 20 --learning_rate 0.01 --suppress_threshold 0.0 --folds 2 --batch_size 1
+
 
 if __name__ == '__main__':
     # Step 1: Import argparse
-    parser = argparse.ArgumentParser(description='Baseline GAT Model Training')
+    parser = argparse.ArgumentParser(description='Baseline GCN Model Training')
     # Step 2: Define command-line arguments
     parser.add_argument('--dataset_path', type=str, required=True, help='Path to the dataset')
     parser.add_argument('--in_channels', type=int, required=True, help='Number of input channels')
     parser.add_argument('--hidden_channels', type=int, required=True, help='Number of hidden channels')
     parser.add_argument('--out_channels', type=int, required=True, help='Number of output channels')
-    parser.add_argument('--heads', type=int, required=True, help='Number of attention heads')
-    parser.add_argument('--num_layers', type=int, required=True, help='Number of GAT layers')
     parser.add_argument('--device', type=str, choices=['cpu', 'cuda'], default='cpu', help='Device to use for training')
     parser.add_argument('--epochs', type=int, default=100, help='Number of training epochs')
     parser.add_argument('--learning_rate', type=float, default=0.01, help='Learning rate for training')
@@ -132,10 +188,12 @@ if __name__ == '__main__':
     connectivity_matrices = standardize_matrices(ppmi_dataset['data'].numpy())
     connectivity_labels = ppmi_dataset['class_label']
     # Filter matrices and labels to keep only control (0) and patient (2) classes
-    mask = (connectivity_labels == 0) | (connectivity_labels == 2)
+    mask = (connectivity_labels < 3)
     connectivity_matrices = connectivity_matrices[mask]
+    print(f'Connectivity Matrices Mean: {np.mean(connectivity_matrices)}')
+    print(f'Connectivity Matrices Std Dev: {np.std(connectivity_matrices)}')
     connectivity_labels = connectivity_labels[mask].numpy()
-    connectivity_labels[connectivity_labels == 2] = 1
+    # connectivity_labels[connectivity_labels == 2] = 1
     print(f'Original matrices shape: {connectivity_matrices.shape}')
     print(f'Original labels shape: {connectivity_labels.shape}')
     graphs = []
@@ -149,12 +207,12 @@ if __name__ == '__main__':
     loaders = create_data_loaders(graphs, labels, n_splits=args.folds, batch_size=args.batch_size)
     print("Data loaders created.")
     # Initialize TensorBoard writer
-    writer = SummaryWriter(log_dir=f'runs/baseline_in{args.in_channels}_h{args.hidden_channels}_out{args.out_channels}_a{args.heads}.pth')
+    writer = SummaryWriter(log_dir=f'runs/baseline_in{args.in_channels}_h{args.hidden_channels}_out{args.out_channels}.pth')
     print("Starting training with cross-validation...")
     # Training with Cross-Validation
     for fold, (train_loader, test_loader) in enumerate(loaders):
         print(f"Training fold {fold + 1}...")
-        model = GAT(args.in_channels, args.hidden_channels, args.out_channels, args.heads, args.num_layers).to(device)
+        model = GCN(args.in_channels, args.hidden_channels, args.out_channels).to(device)
         optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
         criterion = nn.CrossEntropyLoss()
         best_acc = 0.0
@@ -175,7 +233,7 @@ if __name__ == '__main__':
                 best_acc = test_acc
                 best_model_wts = model.state_dict()
         # Save the best model for this fold
-        model_save_path = f'models/baseline_in{args.in_channels}_h{args.hidden_channels}_out{args.out_channels}_a{args.heads}_layers{args.num_layers}.pth'
+        model_save_path = f'models/baseline_in{args.in_channels}_h{args.hidden_channels}_out{args.out_channels}_fold{fold+1}.pth'
         torch.save({
             'model_state_dict': best_model_wts,
             'optimizer_state_dict': optimizer.state_dict(),
