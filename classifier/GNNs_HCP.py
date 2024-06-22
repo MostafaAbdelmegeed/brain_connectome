@@ -15,12 +15,26 @@ from torch.utils.data import random_split
 from tqdm import tqdm
 
 
+# python classifier/GNNs_HCP.py --gpu 0 --model GCN --hidden_channels 8 --epochs 200 --input_path data/adni_raw.pth
+
+
+# Check if running in a non-interactive environment (e.g., using nohup)
+is_non_interactive = not os.isatty(1)
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', type=str, default='0')
     parser.add_argument('--model', type=str, default='GCN', choices=['GCN', 'GIN', 'GAT'])
+    parser.add_argument('--num_layers', type=int, default=2)
+    parser.add_argument('--heads', type=int, default=2)
+    parser.add_argument('--in_feats', type=int, default=116)
+    parser.add_argument('--out_feats', type=int, default=4)
+    parser.add_argument('--input_path', type=str, default='data/ppmi_raw.pth')
     parser.add_argument('--hidden_channels', type=int, default=8)
     parser.add_argument('--epochs', type=int, default=200)
+    parser.add_argument('--batch_size', type=int, default=1)
+    parser.add_argument('--lr', type=float, default=0.001)
     args = parser.parse_args()
     return args
 
@@ -32,13 +46,10 @@ def set_seeds(seed=0):
 def get_device(gpu_id):
     return torch.device(f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu')
 
-def load_data():
-    dataset = torch.load('data/ppmi_raw.pth')
-    # train_dataset = Dataset_graph(./data/LR_graph')
-    # test_dataset = Dataset_graph('./data/RL_graph')
+def load_data(path='data/ppmi_raw.pth', batchsize=1):
+    dataset = torch.load(path)
     train_set, val_set, test_set = random_split(dataset, [0.8, 0.1, 0.1])
     print(f"Train set: {len(train_set)}, Val set: {len(val_set)}, Test set: {len(test_set)}")
-    batchsize = 1
     train_loader = DataLoader(train_set, batch_size=batchsize, shuffle=True, num_workers=8)
     val_loader = DataLoader(val_set, batch_size=batchsize, shuffle=True, num_workers=8)
     test_loader = DataLoader(test_set, batch_size=batchsize, shuffle=True, num_workers=8)
@@ -111,20 +122,20 @@ class GAT(torch.nn.Module):
         x = self.lin2(x)
         return x
 
-def get_model(model_name, hidden_channels):
+def get_model(model_name, hidden_channels, in_feats=116, out_feats=4, num_layers=2, heads=2):
     if model_name == 'GCN':
-        return GCN(in_feats=116, hidden_size=hidden_channels, out_feats=4)
+        return GCN(in_feats=in_feats, hidden_size=hidden_channels, out_feats=out_feats)
     elif model_name == 'GIN':
-        return GIN(in_channels=116, hidden_channels=hidden_channels, out_channels=4, num_layers=2)
+        return GIN(in_channels=in_feats, hidden_channels=hidden_channels, out_channels=out_feats, num_layers=num_layers)
     elif model_name == 'GAT':
-        return GAT(in_channels=116, hidden_channels=hidden_channels, out_channels=4, heads=2)
+        return GAT(in_channels=in_feats, hidden_channels=hidden_channels, out_channels=out_feats, heads=heads)
     else:
         raise argparse.ArgumentTypeError(f"Unsupported model. Choose from GCN, GIN, GAT.")
 
 def train(model, loader, criterion, optimizer, device):
     model.train()
     total_loss = 0
-    for data in tqdm(loader, desc="Training Batches"):
+    for data in tqdm(loader, desc="Training Batches", leave=False, dynamic_ncols=True, disable=is_non_interactive):
         data = data.to(device)
         optimizer.zero_grad()
         out = model(data)
@@ -140,7 +151,7 @@ def test(model, loader, device):
     preds = []
     gts = []
     with torch.no_grad():
-        for data in tqdm(loader, desc="Testing Batches"):
+        for data in tqdm(loader, desc="Testing Batches", leave=False, dynamic_ncols=True, disable=is_non_interactive):
             data = data.to(device)
             out = model(data)
             pred = out.argmax(dim=-1)
@@ -159,16 +170,16 @@ def main():
     args = parse_args()
     set_seeds()
     device = get_device(args.gpu)
-    train_loader, val_loader, test_loader = load_data()
-    model = get_model(args.model, args.hidden_channels).to(device)
+    train_loader, val_loader, test_loader = load_data(path=args.input_path, batchsize=args.batch_size)
+    model = get_model(args.model, args.hidden_channels, args.in_feats, args.out_feats, args.num_layers, args.heads).to(device)
     num_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model: {args.model}, parameters: {num_parameters}")
     
-    optimizer = Adam(model.parameters(), lr=0.001, weight_decay=5e-4)
+    optimizer = Adam(model.parameters(), lr=args.lr, weight_decay=5e-4)
     criterion = nn.CrossEntropyLoss()
     
     best_val_acc = 0
-    for epoch in tqdm(range(1, args.epochs + 1), desc="Training Epochs"):
+    for epoch in tqdm(range(1, args.epochs + 1), desc="Training Epochs", leave=False, dynamic_ncols=True, disable=is_non_interactive):
         loss = train(model, train_loader, criterion, optimizer, device)
         val_acc, _, _, _ = test(model, val_loader, device)
         test_acc, pre, rec, f1 = test(model, test_loader, device)
@@ -179,7 +190,7 @@ def main():
         print(f'Epoch: {epoch:03d}, best Acc: {best_val_acc:.4f}, Test Acc: {test_acc:.4f}, Loss: {loss:.4f}, pre: {pre:.4f}, rec: {rec:.4f}, f1: {f1:.4f}')
 
 
-# python classifier/GNNs_HCP.py --gpu 0 --model GCN --hidden_channels 8 --epochs 200
+
 
 if __name__ == "__main__":
     main()
