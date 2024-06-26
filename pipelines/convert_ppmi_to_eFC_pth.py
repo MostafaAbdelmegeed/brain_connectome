@@ -1,5 +1,4 @@
 import numpy as np
-from scipy.stats import zscore
 import sys
 from pathlib import Path
 from tqdm import tqdm
@@ -10,7 +9,7 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
 from graphIO.io import read_ppmi_timeseries
 
-# python pipelines/convert_ppmi_to_eFC_pth.py --source "./data/ppmi" --destination ".data/ppmi_efc.pth"
+# python pipelines/convert_ppmi_to_eFC_pth.py --source "./data/ppmi" --destination "./data/ppmi_efc.pth"
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -25,41 +24,41 @@ def compute_eTS(timeseries):
     """
     Compute edge time series (eTS) for a given pair of regions.
     Args:
-    - timeseries: Numpy array of shape (N, T), where N is the number of regions and T is the number of time points.
+    - timeseries: Tensor of shape (N, T), where N is the number of regions and T is the number of time points.
     
     Returns:
-    - eTS: Numpy array of shape (N, N, T), representing the edge time series.
+    - eTS: Tensor of shape (N, N, T), representing the edge time series.
     """
     N, T = timeseries.shape
-    z_timeseries = zscore(timeseries, axis=1)
-    eTS = np.einsum('it,jt->ijt', z_timeseries, z_timeseries)
+    z_timeseries = (timeseries - timeseries.mean(dim=1, keepdim=True)) / timeseries.std(dim=1, keepdim=True)
+    eTS = torch.einsum('it,jt->ijt', z_timeseries, z_timeseries)
     return eTS
 
 def compute_eFC(eTS):
     """
     Compute edge functional connectivity (eFC) from edge time series (eTS).
     Args:
-    - eTS: Numpy array of shape (N, N, T), representing the edge time series.
+    - eTS: Tensor of shape (N, N, T), representing the edge time series.
     
     Returns:
-    - eFC: Numpy array of shape (N, N), representing the edge functional connectivity.
+    - eFC: Tensor of shape (N, N), representing the edge functional connectivity.
     """
     N, _, T = eTS.shape
     eTS_reshaped = eTS.reshape(N * N, T)
-    eFC = np.corrcoef(eTS_reshaped)
+    eFC = torch.corrcoef(eTS_reshaped)
     return eFC[:N, :N]
 
 def pipeline(timeseries_data):
     """
     Pipeline to compute edge functional connectivity (eFC) matrices from timeseries data.
     Args:
-    - timeseries_data: Numpy array of shape (M, N, T), where M is the number of records, N is the number of regions, and T is the number of time points.
+    - timeseries_data: Tensor of shape (M, N, T), where M is the number of records, N is the number of regions, and T is the number of time points.
     
     Returns:
-    - eFC_matrices: Numpy array of shape (M, N, N), representing the edge functional connectivity matrices for each record.
+    - eFC_matrices: Tensor of shape (M, N, N), representing the edge functional connectivity matrices for each record.
     """
     M, N, T = timeseries_data.shape
-    eFC_matrices = np.zeros((M, N, N))
+    eFC_matrices = torch.zeros((M, N, N), device=timeseries_data.device)
     
     for i in tqdm(range(M), desc="Computing eFC matrices"):
         eTS = compute_eTS(timeseries_data[i])
@@ -77,13 +76,18 @@ if __name__ == "__main__":
     labels = data['label']
     timeseries_data = data['timeseries']
     
-    # Ensure the NumPy array is writable
-    timeseries_data = np.copy(timeseries_data)
+    # Ensure the NumPy array is writable and convert to PyTorch tensor
+    timeseries_data = torch.tensor(np.copy(timeseries_data), dtype=torch.float32)
+    
+    # Move data to GPU if available
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    timeseries_data = timeseries_data.to(device)
+    labels = labels.to(device)
     
     print(f'Timeseries data shape: {timeseries_data.shape}, Labels shape: {labels.shape}')
     eFC_matrices = pipeline(timeseries_data)
     print(f'eFC matrices shape: {eFC_matrices.shape}')
     
     # Save the eFC matrices and labels
-    torch.save({'eFC_matrices': torch.tensor(eFC_matrices), 'labels': labels}, destination)
+    torch.save({'eFC_matrices': eFC_matrices, 'labels': labels}, destination)
     print(f'eFC matrices and labels saved to {destination}')
