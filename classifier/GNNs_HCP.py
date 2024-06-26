@@ -15,7 +15,7 @@ from torch.utils.data import random_split
 from tqdm import tqdm
 
 
-# python classifier/GNNs_HCP.py --gpu 0 --model GCN --hidden_channels 8 --epochs 200 --input_path data/adni_raw.pth
+# python classifier/GNNs_HCP.py --gpu 0 --model GCN --hidden_channels 8 --epochs 200 --input_path data/adni_raw.pth --batch_size 1 --lr 0.001 --num_layers 2 --heads 2 --in_feats 116 --out_feats 4
 
 
 # Check if running in a non-interactive environment (e.g., using nohup)

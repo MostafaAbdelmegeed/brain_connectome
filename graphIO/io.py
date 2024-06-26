@@ -13,8 +13,6 @@ def load_data(dataset_path):
     return connectivity_matrices, connectivity_labels
 
 
-
-
 def write_adj_matrix(adj_matrix_file_path, adj_matrix):
     """
     Writes an adjacency matrix to a file.
@@ -66,6 +64,7 @@ def read_adj_matrices_from_directory(directory, include_string='', as_tensor=Fal
             # Store the adjacency matrix in the dictionary
             adj_matrices[os.path.splitext(filename)[0]] = adj_matrix
     return adj_matrices
+
 
 def parse_class_name(directory_name):
     """
@@ -156,7 +155,6 @@ def read_ppmi_data_as_tensors(ppmi_directory, atlas='AAL116', method='new'):
     return {'matrix': torch.stack(data), 'label': torch.tensor(class_labels, dtype=torch.int64), 'id': torch.tensor(id_labels, dtype=torch.int64)}
     
 
-
 def read_ad_curv_data(ad_directory, as_tensor=False):
     control_matrices = read_adj_matrices_from_directory(f'{ad_directory}/CN-50/new/', include_string='', as_tensor=as_tensor)
     ad_matrices = read_adj_matrices_from_directory(f'{ad_directory}/AD-50/new/', include_string='', as_tensor=as_tensor)
@@ -236,6 +234,44 @@ def analyze_matrices(matrices):
 
 def is_symmetric(matrix, tol=1e-8):
     return np.allclose(matrix, matrix.T, atol=tol)
+
+
+def read_ppmi_timeseries(ppmi_directory):
+    classname_to_label = {'control': 0, 'prodromal': 1, 'patient': 2, 'swedd': 3}
+    subdirectories = [d for d in os.listdir(ppmi_directory) if os.path.isdir(os.path.join(ppmi_directory, d))]
+    data = []
+    class_labels = []
+    id_labels = []
+    max_rows, max_cols = 0, 0
+    for subdirectory in tqdm(subdirectories, desc="Processing directories"):
+        class_name = parse_class_name(subdirectory)
+        class_label = classname_to_label[class_name[4:]]
+        subdirectory_path = os.path.join(ppmi_directory, subdirectory)
+        files = [f for f in os.listdir(subdirectory_path) if os.path.isfile(os.path.join(subdirectory_path, f))]
+        for file_name in files:
+            if 'timeseries' in file_name and 'AAL116' in file_name:
+                record_name = parse_record_name(file_name)
+                record_id = int(''.join(filter(str.isdigit, record_name)))
+                file_path = os.path.join(subdirectory_path, file_name)
+                adj_matrix = read_adj_matrix_from_file(file_path, as_tensor=True)
+                max_rows = max(max_rows, adj_matrix.size(0))
+                max_cols = max(max_cols, adj_matrix.size(1))
+                data.append(adj_matrix)
+                class_labels.append(class_label)
+                id_labels.append(record_id)
+    # Padding matrices to the same shape
+    padded_data = []
+    for matrix in data:
+        padded_matrix = torch.zeros(max_rows, max_cols)
+        padded_matrix[:matrix.size(0), :matrix.size(1)] = matrix
+        padded_data.append(padded_matrix)
+    return {
+        'timeseries': torch.stack(padded_data),
+        'label': torch.tensor(class_labels, dtype=torch.int64),
+        'id': torch.tensor(id_labels, dtype=torch.int64)
+    }
+
+
 
 
 
