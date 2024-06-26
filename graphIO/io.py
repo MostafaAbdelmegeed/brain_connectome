@@ -253,7 +253,7 @@ def read_ppmi_timeseries(ppmi_directory):
                 record_name = parse_record_name(file_name)
                 record_id = int(''.join(filter(str.isdigit, record_name)))
                 file_path = os.path.join(subdirectory_path, file_name)
-                adj_matrix = read_adj_matrix_from_file(file_path, as_tensor=True)
+                adj_matrix = read_adj_matrix_from_file(file_path, as_tensor=True).transpose(0,1)
                 max_rows = max(max_rows, adj_matrix.size(0))
                 max_cols = max(max_cols, adj_matrix.size(1))
                 data.append(adj_matrix)
