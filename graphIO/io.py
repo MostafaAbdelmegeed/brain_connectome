@@ -5,6 +5,7 @@ from tqdm import tqdm
 import torch
 from scipy.io import loadmat
 from .preprocess import center_matrices
+import pandas as pd
 
 def load_data(dataset_path):
     ppmi_dataset = torch.load(dataset_path)
@@ -270,6 +271,54 @@ def read_ppmi_timeseries(ppmi_directory):
         'label': torch.tensor(class_labels, dtype=torch.int64),
         'id': torch.tensor(id_labels, dtype=torch.int64)
     }
+
+
+def read_adni_timeseries(adni_directory):
+    # Get a list of files in the ADNI directory
+    files = [f for f in os.listdir(adni_directory) if os.path.isfile(os.path.join(adni_directory, f))]
+    # Find the file ending with .csv
+    csv_file = next((f for f in files if f.endswith('.csv')), None)
+    if csv_file is None:
+        raise FileNotFoundError("No CSV file found in the ADNI directory.")
+    # Read the CSV file using pandas
+    csv_file_path = os.path.join(adni_directory, csv_file)
+    labels_df = pd.read_csv(csv_file_path, header=0)
+    labels = []
+    data = []
+    data_dir = f'{adni_directory}/AAL90'
+    max_rows, max_cols = 0, 0
+    
+    for filename in os.listdir(data_dir):
+        if filename.startswith('sub_'):
+            id = filename.split('_')[1]
+            label_row = labels_df[labels_df['subject_id'] == id]
+            if not label_row.empty:
+                label = label_row.iloc[0]['DX']
+                if label in ['CN', 'SMC', 'EMCI']:
+                    labels.append(0)
+                elif label in ['LMCI', 'AD']:
+                    labels.append(1)
+                else:
+                    print('Label Error')
+                    labels.append(-1)
+                features = np.loadtxt(os.path.join(data_dir, filename)).T
+                data.append(features)
+                max_rows = max(max_rows, features.shape[0])
+                max_cols = max(max_cols, features.shape[1])
+    
+    # Padding matrices to the same shape
+    padded_data = []
+    for features in data:
+        padded_matrix = np.zeros((max_rows, max_cols))
+        padded_matrix[:features.shape[0], :features.shape[1]] = features
+        padded_data.append(padded_matrix)
+    
+    # Convert to torch tensors
+    data_tensor = torch.tensor(np.array(padded_data), dtype=torch.float32)
+    labels_tensor = torch.tensor(labels, dtype=torch.int64)
+    
+    return {'timeseries': data_tensor, 'label': labels_tensor}
+    
 
 
 
