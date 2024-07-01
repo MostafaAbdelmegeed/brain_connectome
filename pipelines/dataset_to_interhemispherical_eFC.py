@@ -72,7 +72,7 @@ if __name__ == "__main__":
     labels = data['label']
     timeseries_data = data['timeseries']
 
-    timeseries_data = torch.tensor(np.copy(timeseries_data), dtype=torch.float32)
+    timeseries_data = torch.tensor(np.copy(timeseries_data), dtype=torch.float16)
     
     # Create lists of indices for left and right hemisphere regions
     left_indices = [i for i in range(timeseries_data.shape[1]) if i % 2 == 0]
