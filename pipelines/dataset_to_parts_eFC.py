@@ -34,44 +34,18 @@ def compute_eFC(edge_features):
     return eFC
 
 def identify_homotopic_pairs(N):
-    """
-    Identify homotopic pairs of regions.
-    Args:
-    - N: Total number of regions (should be even).
-    
-    Returns:
-    - homotopic_pairs: List of tuples representing homotopic pairs.
-    """
     homotopic_pairs = [(i, i + 1) for i in range(0, N, 2)]
     return homotopic_pairs
 
 def extract_hemisphere_timeseries(timeseries_data, indices):
-    """
-    Extract time series data for a specific hemisphere.
-    Args:
-    - timeseries_data: Tensor of shape (M, N, T)
-    - indices: List of indices for the hemisphere
-    
-    Returns:
-    - hemisphere_timeseries: Tensor of shape (M, len(indices), T)
-    """
     return timeseries_data[:, indices, :]
 
 def extract_homotopic_timeseries(timeseries_data, homotopic_pairs):
-    """
-    Extract time series data for homotopic pairs.
-    Args:
-    - timeseries_data: Tensor of shape (M, N, T)
-    - homotopic_pairs: List of tuples representing homotopic pairs
-    
-    Returns:
-    - homotopic_timeseries: Tensor of shape (M, len(homotopic_pairs) * 2, T)
-    """
     indices = [index for pair in homotopic_pairs for index in pair]
     return timeseries_data[:, indices, :]
 
 def pipeline(timeseries_data, indices):
-    M, N, T = timeseries_data.shape
+    M, _, T = timeseries_data.shape
     hemisphere_data = extract_hemisphere_timeseries(timeseries_data, indices)
     E = len(indices) * (len(indices) - 1) // 2
     eFC_matrices = torch.zeros((M, E, E))
@@ -80,21 +54,21 @@ def pipeline(timeseries_data, indices):
         eTS = compute_eTS(hemisphere_data[i])
         edge_features = compute_edge_features(eTS)
         eFC = compute_eFC(edge_features)
-        eFC_matrices[i] = eFC
+        eFC_matrices[i] = eFC[:E, :E]  # Ensure the correct shape
     
     return eFC_matrices
 
 def homotopic_pipeline(timeseries_data, homotopic_pairs):
-    M, N, T = timeseries_data.shape
+    M, _, T = timeseries_data.shape
     homotopic_timeseries = extract_homotopic_timeseries(timeseries_data, homotopic_pairs)
-    E = len(homotopic_pairs) * (len(homotopic_pairs) - 1) // 2
+    E = len(homotopic_pairs)
     eFC_matrices = torch.zeros((M, E, E))
     
     for i in tqdm(range(M), desc="Computing homotopic eFC matrices"):
         eTS = compute_eTS(homotopic_timeseries[i])
         edge_features = compute_edge_features(eTS)
         eFC = compute_eFC(edge_features)
-        eFC_matrices[i] = eFC
+        eFC_matrices[i] = eFC[:E, :E]  # Ensure the correct shape
     
     return eFC_matrices
 
