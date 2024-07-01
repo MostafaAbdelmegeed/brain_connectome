@@ -34,7 +34,10 @@ def compute_eFC(edge_features, device):
     
     for i in range(num_edges):
         for j in range(i, num_edges):
-            eFC[i, j] = torch.corrcoef(edge_features[i].to(device), edge_features[j].to(device))[0, 1]
+            cov_ij = torch.mean(edge_features[i] * edge_features[j])
+            std_i = torch.std(edge_features[i])
+            std_j = torch.std(edge_features[j])
+            eFC[i, j] = cov_ij / (std_i * std_j)
             eFC[j, i] = eFC[i, j]
     
     return eFC
