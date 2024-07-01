@@ -32,7 +32,7 @@ def compute_edge_features(eTS):
 def compute_eFC(edge_features):
     # Compute the correlation coefficient matrix in smaller chunks
     num_edges = edge_features.shape[0]
-    chunk_size = 64  # Adjust chunk size based on available memory
+    chunk_size = 16  # Adjust chunk size based on available memory
     eFC = torch.zeros((num_edges, num_edges), dtype=torch.float16)
 
     for i in range(0, num_edges, chunk_size):
