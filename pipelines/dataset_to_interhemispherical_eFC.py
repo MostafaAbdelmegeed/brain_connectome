@@ -23,8 +23,6 @@ def compute_eTS(timeseries, device):
     N, T = timeseries.shape
     z_timeseries = (timeseries - timeseries.mean(dim=1, keepdim=True).to(device)) / timeseries.std(dim=1, keepdim=True).to(device)
     eTS = torch.einsum('it,jt->ijt', z_timeseries, z_timeseries).to(device)
-    triu_indices = torch.triu_indices(N, N, offset=1).to(device)
-    eTS = eTS[triu_indices[0], triu_indices[1]]
     return eTS
 
 def compute_edge_features(eTS, device):
@@ -33,7 +31,7 @@ def compute_edge_features(eTS, device):
 def compute_eFC(edge_features, device):
     num_edges = edge_features.shape[0]
     eFC = torch.zeros((num_edges, num_edges), dtype=torch.float32, device=device)
-
+    
     for i in range(num_edges):
         for j in range(i, num_edges):
             eFC[i, j] = torch.corrcoef(edge_features[i].to(device), edge_features[j].to(device))[0, 1]
@@ -45,22 +43,23 @@ def identify_interhemispherical_pairs(left_indices, right_indices):
     interhemispherical_pairs = [(left, right) for left in left_indices for right in right_indices]
     return interhemispherical_pairs
 
-def extract_timeseries_for_pairs(timeseries_data, pairs, device):
-    indices = [index for pair in pairs for index in pair]
-    return timeseries_data[:, indices, :].to(device)
+def extract_interhemispherical_eFC(full_eFC, left_indices, right_indices):
+    interhemispherical_eFC = full_eFC[left_indices, :][:, right_indices]
+    return interhemispherical_eFC
 
-def interhemispherical_pipeline(timeseries_data, pairs, device):
+def interhemispherical_pipeline(timeseries_data, left_indices, right_indices, device):
     M, _, T = timeseries_data.shape
-    pairs_data = extract_timeseries_for_pairs(timeseries_data, pairs, device)
-    E = len(pairs)
-    eFC_matrices = torch.zeros((M, E, E), dtype=torch.float32, device=device)
+    eFC_matrices = []
 
     for i in tqdm(range(M), desc="Computing interhemispherical eFC matrices"):
-        eTS = compute_eTS(pairs_data[i], device)
+        eTS = compute_eTS(timeseries_data[i], device)
         edge_features = compute_edge_features(eTS, device)
-        eFC = compute_eFC(edge_features, device)
-        eFC_matrices[i] = eFC[:E, :E]  # Ensure the correct shape
-
+        full_eFC = compute_eFC(edge_features, device)
+        
+        interhemispherical_eFC = extract_interhemispherical_eFC(full_eFC, left_indices, right_indices)
+        eFC_matrices.append(interhemispherical_eFC.cpu())
+    
+    eFC_matrices = torch.stack(eFC_matrices)
     return eFC_matrices
 
 if __name__ == "__main__":
@@ -75,15 +74,12 @@ if __name__ == "__main__":
     timeseries_data = torch.tensor(np.copy(timeseries_data), dtype=torch.float32).to(device)
     
     # Create lists of indices for left and right hemisphere regions
-    left_indices = [i for i in range(timeseries_data.shape[1]) if i % 2 == 0]
-    right_indices = [i for i in range(timeseries_data.shape[1]) if i % 2 != 0]
-    
-    # Identify interhemispherical pairs
-    interhemispherical_pairs = identify_interhemispherical_pairs(left_indices, right_indices)
+    left_indices = torch.tensor([i for i in range(timeseries_data.shape[1]) if i % 2 == 0], device=device)
+    right_indices = torch.tensor([i for i in range(timeseries_data.shape[1]) if i % 2 != 0], device=device)
     
     print(f'Timeseries data shape: {timeseries_data.shape}, Labels shape: {labels.shape}')
     
-    interhemispherical_eFC_matrices = interhemispherical_pipeline(timeseries_data, interhemispherical_pairs, device)
+    interhemispherical_eFC_matrices = interhemispherical_pipeline(timeseries_data, left_indices, right_indices, device)
     
     print(f'Interhemispherical eFC matrices shape: {interhemispherical_eFC_matrices.shape}')
 
