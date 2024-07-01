@@ -4,6 +4,8 @@ from pathlib import Path
 from tqdm import tqdm
 import torch
 import argparse
+import os
+import tempfile
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
@@ -30,16 +32,13 @@ def compute_edge_features(eTS):
     return eTS
 
 def compute_eFC(edge_features):
-    # Compute the correlation coefficient matrix in smaller chunks
     num_edges = edge_features.shape[0]
-    chunk_size = 16  # Adjust chunk size based on available memory
-    eFC = torch.zeros((num_edges, num_edges), dtype=torch.float16)
+    eFC = torch.zeros((num_edges, num_edges), dtype=torch.float32)
 
-    for i in range(0, num_edges, chunk_size):
-        end_i = min(i + chunk_size, num_edges)
-        for j in range(0, num_edges, chunk_size):
-            end_j = min(j + chunk_size, num_edges)
-            eFC[i:end_i, j:end_j] = torch.corrcoef(edge_features[i:end_i], edge_features[j:end_j])
+    for i in range(num_edges):
+        for j in range(i, num_edges):
+            eFC[i, j] = torch.corrcoef(edge_features[i], edge_features[j])[0, 1]
+            eFC[j, i] = eFC[i, j]
     
     return eFC
 
@@ -51,19 +50,23 @@ def extract_timeseries_for_pairs(timeseries_data, pairs):
     indices = [index for pair in pairs for index in pair]
     return timeseries_data[:, indices, :]
 
-def interhemispherical_pipeline(timeseries_data, pairs):
+def interhemispherical_pipeline(timeseries_data, pairs, temp_dir):
     M, _, T = timeseries_data.shape
     pairs_data = extract_timeseries_for_pairs(timeseries_data, pairs)
     E = len(pairs)
-    eFC_matrices = torch.zeros((M, E, E), dtype=torch.float32)
+
+    temp_files = []
 
     for i in tqdm(range(M), desc="Computing interhemispherical eFC matrices"):
         eTS = compute_eTS(pairs_data[i])
         edge_features = compute_edge_features(eTS)
         eFC = compute_eFC(edge_features)
-        eFC_matrices[i] = eFC[:E, :E]  # Ensure the correct shape
 
-    return eFC_matrices
+        temp_file = os.path.join(temp_dir, f'eFC_matrix_{i}.pt')
+        torch.save(eFC[:E, :E], temp_file)
+        temp_files.append(temp_file)
+
+    return temp_files
 
 if __name__ == "__main__":
     args = parse_args()
@@ -72,7 +75,7 @@ if __name__ == "__main__":
     labels = data['label']
     timeseries_data = data['timeseries']
 
-    timeseries_data = torch.tensor(np.copy(timeseries_data), dtype=torch.float16)
+    timeseries_data = torch.tensor(np.copy(timeseries_data), dtype=torch.float32)
     
     # Create lists of indices for left and right hemisphere regions
     left_indices = [i for i in range(timeseries_data.shape[1]) if i % 2 == 0]
@@ -82,15 +85,23 @@ if __name__ == "__main__":
     interhemispherical_pairs = identify_interhemispherical_pairs(left_indices, right_indices)
     
     print(f'Timeseries data shape: {timeseries_data.shape}, Labels shape: {labels.shape}')
-    
-    interhemispherical_eFC_matrices = interhemispherical_pipeline(timeseries_data, interhemispherical_pairs)
-    
-    print(f'Interhemispherical eFC matrices shape: {interhemispherical_eFC_matrices.shape}')
 
-    destination = './data/' + args.dataset + '_interhemispherical_eFC.pth'
+    # Create a temporary directory to store intermediate results
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_files = interhemispherical_pipeline(timeseries_data, interhemispherical_pairs, temp_dir)
+        
+        # Load the results from the temporary files and combine them
+        eFC_matrices = []
+        for temp_file in temp_files:
+            eFC_matrices.append(torch.load(temp_file))
+        eFC_matrices = torch.stack(eFC_matrices)
     
-    torch.save({
-        'interhemispherical_eFC_matrices': interhemispherical_eFC_matrices, 
-        'labels': labels
-    }, destination)
-    print(f'Interhemispherical eFC matrices and labels saved to {destination}')
+        print(f'Interhemispherical eFC matrices shape: {eFC_matrices.shape}')
+    
+        destination = './data/' + args.dataset + '_interhemispherical_eFC.pth'
+        
+        torch.save({
+            'interhemispherical_eFC_matrices': eFC_matrices, 
+            'labels': labels
+        }, destination)
+        print(f'Interhemispherical eFC matrices and labels saved to {destination}')
