@@ -4,8 +4,6 @@ from pathlib import Path
 from tqdm import tqdm
 import torch
 import argparse
-import os
-import tempfile
 
 project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
@@ -17,27 +15,28 @@ def parse_args():
     parser.add_argument('--atlas', type=str, default='AAL116', help='Atlas to use.')
     parser.add_argument('--method', type=str, default='timeseries', help='Use correlation matrices', choices=['correlation', 'curvature', 'timeseries'])
     parser.add_argument('--destination', type=str, default='interhemispherical_eFC_matrices.pth', help='Save path for the processed data.')
+    parser.add_argument('--gpu', type=int, default=0, help='GPU device ID to use.')
     args = parser.parse_args()
     return args
 
-def compute_eTS(timeseries):
+def compute_eTS(timeseries, device):
     N, T = timeseries.shape
-    z_timeseries = (timeseries - timeseries.mean(dim=1, keepdim=True)) / timeseries.std(dim=1, keepdim=True)
-    eTS = torch.einsum('it,jt->ijt', z_timeseries, z_timeseries)
-    triu_indices = torch.triu_indices(N, N, offset=1)
+    z_timeseries = (timeseries - timeseries.mean(dim=1, keepdim=True).to(device)) / timeseries.std(dim=1, keepdim=True).to(device)
+    eTS = torch.einsum('it,jt->ijt', z_timeseries, z_timeseries).to(device)
+    triu_indices = torch.triu_indices(N, N, offset=1).to(device)
     eTS = eTS[triu_indices[0], triu_indices[1]]
     return eTS
 
-def compute_edge_features(eTS):
-    return eTS
+def compute_edge_features(eTS, device):
+    return eTS.to(device)
 
-def compute_eFC(edge_features):
+def compute_eFC(edge_features, device):
     num_edges = edge_features.shape[0]
-    eFC = torch.zeros((num_edges, num_edges), dtype=torch.float32)
+    eFC = torch.zeros((num_edges, num_edges), dtype=torch.float32, device=device)
 
     for i in range(num_edges):
         for j in range(i, num_edges):
-            eFC[i, j] = torch.corrcoef(edge_features[i], edge_features[j])[0, 1]
+            eFC[i, j] = torch.corrcoef(edge_features[i].to(device), edge_features[j].to(device))[0, 1]
             eFC[j, i] = eFC[i, j]
     
     return eFC
@@ -46,36 +45,34 @@ def identify_interhemispherical_pairs(left_indices, right_indices):
     interhemispherical_pairs = [(left, right) for left in left_indices for right in right_indices]
     return interhemispherical_pairs
 
-def extract_timeseries_for_pairs(timeseries_data, pairs):
+def extract_timeseries_for_pairs(timeseries_data, pairs, device):
     indices = [index for pair in pairs for index in pair]
-    return timeseries_data[:, indices, :]
+    return timeseries_data[:, indices, :].to(device)
 
-def interhemispherical_pipeline(timeseries_data, pairs, temp_dir):
+def interhemispherical_pipeline(timeseries_data, pairs, device):
     M, _, T = timeseries_data.shape
-    pairs_data = extract_timeseries_for_pairs(timeseries_data, pairs)
+    pairs_data = extract_timeseries_for_pairs(timeseries_data, pairs, device)
     E = len(pairs)
-
-    temp_files = []
+    eFC_matrices = torch.zeros((M, E, E), dtype=torch.float32, device=device)
 
     for i in tqdm(range(M), desc="Computing interhemispherical eFC matrices"):
-        eTS = compute_eTS(pairs_data[i])
-        edge_features = compute_edge_features(eTS)
-        eFC = compute_eFC(edge_features)
+        eTS = compute_eTS(pairs_data[i], device)
+        edge_features = compute_edge_features(eTS, device)
+        eFC = compute_eFC(edge_features, device)
+        eFC_matrices[i] = eFC[:E, :E]  # Ensure the correct shape
 
-        temp_file = os.path.join(temp_dir, f'eFC_matrix_{i}.pt')
-        torch.save(eFC[:E, :E], temp_file)
-        temp_files.append(temp_file)
-
-    return temp_files
+    return eFC_matrices
 
 if __name__ == "__main__":
     args = parse_args()
+
+    device = torch.device(f'cuda:{args.gpu}' if torch.cuda.is_available() else 'cpu')
 
     data = read_adni_timeseries('./data/ADNI') if args.dataset == 'ADNI' else read_ppmi_timeseries('./data/PPMI')
     labels = data['label']
     timeseries_data = data['timeseries']
 
-    timeseries_data = torch.tensor(np.copy(timeseries_data), dtype=torch.float32)
+    timeseries_data = torch.tensor(np.copy(timeseries_data), dtype=torch.float32).to(device)
     
     # Create lists of indices for left and right hemisphere regions
     left_indices = [i for i in range(timeseries_data.shape[1]) if i % 2 == 0]
@@ -85,23 +82,15 @@ if __name__ == "__main__":
     interhemispherical_pairs = identify_interhemispherical_pairs(left_indices, right_indices)
     
     print(f'Timeseries data shape: {timeseries_data.shape}, Labels shape: {labels.shape}')
+    
+    interhemispherical_eFC_matrices = interhemispherical_pipeline(timeseries_data, interhemispherical_pairs, device)
+    
+    print(f'Interhemispherical eFC matrices shape: {interhemispherical_eFC_matrices.shape}')
 
-    # Create a temporary directory to store intermediate results
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_files = interhemispherical_pipeline(timeseries_data, interhemispherical_pairs, temp_dir)
-        
-        # Load the results from the temporary files and combine them
-        eFC_matrices = []
-        for temp_file in temp_files:
-            eFC_matrices.append(torch.load(temp_file))
-        eFC_matrices = torch.stack(eFC_matrices)
+    destination = './data/' + args.dataset + '_interhemispherical_eFC.pth'
     
-        print(f'Interhemispherical eFC matrices shape: {eFC_matrices.shape}')
-    
-        destination = './data/' + args.dataset + '_interhemispherical_eFC.pth'
-        
-        torch.save({
-            'interhemispherical_eFC_matrices': eFC_matrices, 
-            'labels': labels
-        }, destination)
-        print(f'Interhemispherical eFC matrices and labels saved to {destination}')
+    torch.save({
+        'interhemispherical_eFC_matrices': interhemispherical_eFC_matrices, 
+        'labels': labels
+    }, destination)
+    print(f'Interhemispherical eFC matrices and labels saved to {destination}')
