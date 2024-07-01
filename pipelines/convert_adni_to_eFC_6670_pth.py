@@ -9,7 +9,7 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
 from graphIO.io import read_adni_timeseries
 
-# python pipelines/convert_adni_to_eFC_pth.py --source "C:/Users/mosta/OneDrive - UNCG/Academics/CSC 699 - Thesis/data/ADNI" --destination "./data/adni_efc.pth"
+# python pipelines/convert_adni_to_eFC_pth.py --source "C:/Users/mosta/OneDrive - UNCG/Academics/CSC 699 - Thesis/data/ADNI" --destination "./data/adni_efc.pth" --gpu 0
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -17,6 +17,7 @@ def parse_args():
     parser.add_argument('--atlas', type=str, default='AAL116', help='Atlas to use.')
     parser.add_argument('--method', type=str, default='timeseries', help='Use correlation matrices', choices=['correlation', 'curvature', 'timeseries'])
     parser.add_argument('--destination', type=str, default='adni_efc.pth', help='Save path for the processed data.')
+    parser.add_argument('--gpu', type=int, default=0, help='GPU device ID to use.')
     args = parser.parse_args()
     return args
 
@@ -86,6 +87,11 @@ if __name__ == "__main__":
     destination = args.destination
     method = args.method
     atlas = args.atlas
+    gpu_id = args.gpu
+
+    # Set the device based on the GPU ID
+    device = torch.device(f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu')
+
     data = read_adni_timeseries(source)
     labels = data['label']
     timeseries_data = data['timeseries']
@@ -93,8 +99,7 @@ if __name__ == "__main__":
     # Ensure the NumPy array is writable and convert to PyTorch tensor
     timeseries_data = torch.tensor(np.copy(timeseries_data), dtype=torch.float32)
     
-    # Move data to GPU if available
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # Move data to the selected GPU if available
     timeseries_data = timeseries_data.to(device)
     labels = labels.to(device)
     
