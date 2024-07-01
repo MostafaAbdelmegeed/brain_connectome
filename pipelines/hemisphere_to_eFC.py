@@ -11,11 +11,10 @@ from graphIO.io import read_adni_timeseries, read_ppmi_timeseries
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--source', type=str, required=True, help='Directory containing the data.')
     parser.add_argument('--dataset', type=str, required=True, choices=['ADNI', 'PPMI'], help='Dataset to use.')
     parser.add_argument('--atlas', type=str, default='AAL116', help='Atlas to use.')
     parser.add_argument('--method', type=str, default='timeseries', help='Use correlation matrices', choices=['correlation', 'curvature', 'timeseries'])
-    parser.add_argument('--destination', type=str, default='efc_matrices.pth', help='Save path for the processed data.')
+    parser.add_argument('--destination', type=str, default='efc.pth', help='Save path for the processed data.')
     args = parser.parse_args()
     return args
 
@@ -62,10 +61,9 @@ def pipeline(timeseries_data, hemisphere_indices):
 
 if __name__ == "__main__":
     args = parse_args()
-    source = args.source
     destination = args.destination
 
-    data = read_adni_timeseries(source) if args.dataset == 'ADNI' else read_ppmi_timeseries(source)
+    data = read_adni_timeseries('./data/ADNI') if args.dataset == 'ADNI' else read_ppmi_timeseries('./data/PPMI')
     labels = data['label']
     timeseries_data = data['timeseries']
 
@@ -82,6 +80,8 @@ if __name__ == "__main__":
     
     print(f'Left hemisphere eFC matrices shape: {left_eFC_matrices.shape}')
     print(f'Right hemisphere eFC matrices shape: {right_eFC_matrices.shape}')
+
+    destination = args.dataset + '_' + 'hemispherical' + '_' + destination
     
     torch.save({'left_eFC_matrices': left_eFC_matrices, 'right_eFC_matrices': right_eFC_matrices, 'labels': labels}, destination)
     print(f'eFC matrices and labels saved to {destination}')
