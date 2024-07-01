@@ -74,7 +74,6 @@ def pairs_pipeline(timeseries_data, pairs):
 
 if __name__ == "__main__":
     args = parse_args()
-    destination = args.destination
 
     data = read_adni_timeseries('./data/ADNI') if args.dataset == 'ADNI' else read_ppmi_timeseries('./data/PPMI')
     labels = data['label']
