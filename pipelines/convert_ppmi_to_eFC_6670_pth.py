@@ -90,7 +90,7 @@ if __name__ == "__main__":
     gpu_id = args.gpu
 
     # Set the device based on the GPU ID
-    device = torch.device(f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
 
     data = read_ppmi_timeseries(source)
     labels = data['label']
