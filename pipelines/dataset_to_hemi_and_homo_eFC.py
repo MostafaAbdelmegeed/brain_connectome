@@ -11,7 +11,6 @@ from graphIO.io import read_adni_timeseries, read_ppmi_timeseries
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--source', type=str, required=True, help='Directory containing the data.')
     parser.add_argument('--dataset', type=str, required=True, choices=['ADNI', 'PPMI'], help='Dataset to use.')
     parser.add_argument('--atlas', type=str, default='AAL116', help='Atlas to use.')
     parser.add_argument('--method', type=str, default='timeseries', help='Use correlation matrices', choices=['correlation', 'curvature', 'timeseries'])
@@ -101,10 +100,9 @@ def homotopic_pipeline(timeseries_data, homotopic_pairs):
 
 if __name__ == "__main__":
     args = parse_args()
-    source = args.source
     destination = args.destination
 
-    data = read_adni_timeseries(source) if args.dataset == 'ADNI' else read_ppmi_timeseries(source)
+    data = read_adni_timeseries('./data/ADNI') if args.dataset == 'ADNI' else read_ppmi_timeseries('./data/PPMI')
     labels = data['label']
     timeseries_data = data['timeseries']
 
