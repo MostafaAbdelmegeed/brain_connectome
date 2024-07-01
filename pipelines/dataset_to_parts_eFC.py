@@ -103,7 +103,9 @@ if __name__ == "__main__":
     left_eFC_matrices = pipeline(timeseries_data, left_indices, args.batch_size)
     right_eFC_matrices = pipeline(timeseries_data, right_indices, args.batch_size)
     homotopic_eFC_matrices = pairs_pipeline(timeseries_data, homotopic_pairs, args.batch_size)
-    interhemispherical_eFC_matrices = pairs_pipeline(timeseries_data, interhemispherical_pairs, args.batch_size)
+
+    # Reduce batch size for interhemispherical connections to further manage memory usage
+    interhemispherical_eFC_matrices = pairs_pipeline(timeseries_data, interhemispherical_pairs, max(1, args.batch_size // 2))
     
     print(f'Left hemisphere eFC matrices shape: {left_eFC_matrices.shape}')
     print(f'Right hemisphere eFC matrices shape: {right_eFC_matrices.shape}')
