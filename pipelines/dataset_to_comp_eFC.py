@@ -87,17 +87,25 @@ if __name__ == "__main__":
     intra_right = timeseries_data[:, right_indices, :]
     homotopic = timeseries_data[:, left_indices, :] - timeseries_data[:, right_indices, :]
     
+    eFC = pipeline(timeseries_data, device)
     inter_eFC = interhemispheric_pipeline(timeseries_data, left_indices, right_indices, device)
     intra_left_eFC = pipeline(intra_left, device)
     intra_right_eFC = pipeline(intra_right, device)
-    homotopic_eFC = pipeline(homotopic, device)
+    homo_eFC = pipeline(homotopic, device)
+
+    print(f'eFC Shape: {eFC.shape}')
+    print(f'inter_eFC Shape: {inter_eFC.shape}')
+    print(f'intra_left_eFC Shape: {intra_left_eFC.shape}')
+    print(f'intra_right_eFC Shape: {intra_right_eFC.shape}')
+    print(f'homotopic_eFC Shape: {homo_eFC.shape}')
 
     destination = './data/' + args.dataset + '_efc.pth'
     
     torch.save({
+        'eFC': eFC,
         'intra_left': intra_left_eFC,
         'intra_right': intra_right_eFC,
         'inter': inter_eFC,
-        'homo': homotopic_eFC
+        'homo': homo_eFC
     }, destination)
     print(f'eFC matrices and labels saved to {destination}')
