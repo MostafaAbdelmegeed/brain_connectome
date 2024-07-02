@@ -98,6 +98,7 @@ if __name__ == "__main__":
     print(f'intra_left_eFC Shape: {intra_left_eFC.shape}')
     print(f'intra_right_eFC Shape: {intra_right_eFC.shape}')
     print(f'homotopic_eFC Shape: {homo_eFC.shape}')
+    print(f'labels Shape: {labels.shape}')
 
     destination = './data/' + args.dataset + '_efc.pth'
     
@@ -106,6 +107,7 @@ if __name__ == "__main__":
         'intra_left': intra_left_eFC,
         'intra_right': intra_right_eFC,
         'inter': inter_eFC,
-        'homo': homo_eFC
+        'homo': homo_eFC,
+        'label': labels
     }, destination)
     print(f'eFC matrices and labels saved to {destination}')
