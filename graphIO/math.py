@@ -1,5 +1,9 @@
 import numpy as np
 from scipy.stats import ttest_ind
+import torch
+import numpy as np
+from torch_geometric.data import Data
+from torch_geometric.utils import from_scipy_sparse_matrix
 
 ###################### AAL116 MATH
 
@@ -72,6 +76,8 @@ def suppress_interhemispheric(matrix):
 
 def isHomotopic(i, j):
     return i//2 == j//2
+
+
 
 
 ###################### AAL116 MATH

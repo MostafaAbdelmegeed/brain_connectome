@@ -1,6 +1,9 @@
 import argparse
 import sys
-from graphIO import read_ppmi_data_as_tensors
+from pathlib import Path
+project_root = Path(__file__).resolve().parent.parent
+sys.path.append(str(project_root))
+from graphIO.io import read_ppmi_data_as_tensors
 import torch
 
 def parse_args():
@@ -27,5 +30,5 @@ if __name__ == "__main__":
     method = args.method
     data = read_ppmi_data_as_tensors(source, atlas=atlas, method=method)
     curvatures = read_ppmi_data_as_tensors(source, atlas=atlas, method='new')
-    data['curvatures'] = curvatures['data']
+    data['curvatures'] = curvatures['matrix']
     torch.save(data, destination)

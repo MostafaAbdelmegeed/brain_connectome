@@ -1,7 +1,10 @@
 import argparse
-import sys
-from graphIO import read_ppmi_data_as_tensors
 import torch
+import sys
+from pathlib import Path
+project_root = Path(__file__).resolve().parent.parent
+sys.path.append(str(project_root))
+from graphIO.io import read_ppmi_data_as_tensors
 
 def parse_args():
     parser = argparse.ArgumentParser()

@@ -3,9 +3,12 @@ import torch
 import networkx as nx
 from torch_geometric.data import Data
 from tqdm import tqdm
-from torch_geometric.loader import DataLoader
-from sklearn.model_selection import StratifiedKFold
 from .math import *
+import scipy.sparse as sp
+import re
+from torch_geometric.utils import from_scipy_sparse_matrix
+import scipy.sparse as sp
+from torch_geometric.utils.sparse import to_torch_coo_tensor
 
 
 
@@ -55,5 +58,25 @@ def create_graphs(connectivity_matrices):
     for i in tqdm(range(len(connectivity_matrices)), desc='Creating graphs'):
         graphs.append(construct_graph(connectivity_matrices[i]))
     return graphs
+
+
+def compute_diagonal(S):
+    n = S.shape[0]
+    diag = torch.zeros(n)
+    for i in range(n):
+        diag[i] = S[i,i] 
+    return diag
+
+
+def preprocess_adjacency_matrix(adjacency_matrix, percent):
+    top_percent = np.percentile(adjacency_matrix.flatten(), 100-percent)
+    adjacency_matrix[adjacency_matrix < top_percent] = 0
+    data_adj = from_scipy_sparse_matrix(sp.coo_matrix(adjacency_matrix))
+    return data_adj 
+
+def pearson_dataset(data, label, sparsity):
+    adjacency_matrix = preprocess_adjacency_matrix(data, sparsity)
+    data = Data(x=data.float(), edge_index=adjacency_matrix[0], edge_attr=adjacency_matrix[1], y=torch.tensor(label))
+    return data
 
 ################# AAL116 
