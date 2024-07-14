@@ -7,21 +7,32 @@ from torch_geometric.nn import global_mean_pool
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.utils import add_self_loops
 from sklearn.model_selection import KFold
+import argparse
 
-# Hyperparameters
-batch_size = 16
-hidden_layer_size = 512
-epochs = 300
-learning_rate = 0.001
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Train a GCN model for Parkinson\'s disease classification.')
+parser.add_argument('--dataset', type=str, default='PPMI', help='Which dataset to use (PPMI or ADNI)', choices=['PPMI', 'ADNI'])
+parser.add_argument('--batch_size', type=int, default=16, help='Batch size for training')
+parser.add_argument('--hidden_layer_size', type=int, default=512, help='Number of hidden units in each GCN layer')
+parser.add_argument('--epochs', type=int, default=300, help='Number of epochs for training')
+parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for training')
+parser.add_argument('--num_folds', type=int, default=10, help='Number of folds for cross-validation')
+args = parser.parse_args()
+
+# Set hyperparameters from command-line arguments
+batch_size = args.batch_size
+hidden_layer_size = args.hidden_layer_size
+epochs = args.epochs
+learning_rate = args.learning_rate
+num_folds = args.num_folds
 node_feature_dim = 116
 edge_feature_dim = 3
 num_classes = 4
-num_folds = 10  # Number of folds for cross-validation
 
 # Load data
-ppmi = torch.load('data/ppmi.pth')
-connectivities = ppmi['matrix'].numpy()
-labels = ppmi['label']
+connectivity_dataset = torch.load('data/ppmi.pth') if args.dataset == 'PPMI' else torch.load('data/adni.pth')
+connectivities = connectivity_dataset['matrix'].numpy()
+labels = connectivity_dataset['label']
 print(f'matrices: {connectivities.shape}, labels: {labels.shape}')
 print(f'Connectivity matrices shape: {connectivities.shape}, Labels shape: {labels.shape}')
 print(f'Connectivity matrices dtype: {connectivities.dtype}, Labels dtype: {labels.dtype}')
