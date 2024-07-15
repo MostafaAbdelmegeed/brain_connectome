@@ -11,14 +11,14 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import argparse
 
 # Parse command-line arguments
-parser = argparse.ArgumentParser(description='Train a GCN model for Parkinson\'s disease classification.')
+parser = argparse.ArgumentParser(description='Train a GCN model for neurodegenerative diseases classification.')
+parser.add_argument('--dataset', type=str, default='PPMI', help='Dataset to work with', choices=['PPMI', 'ADNI'])
 parser.add_argument('--batch_size', type=int, default=16, help='Batch size for training')
 parser.add_argument('--hidden_layer_size', type=int, default=512, help='Number of hidden units in each GCN layer')
 parser.add_argument('--epochs', type=int, default=300, help='Number of epochs for training')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for training')
 parser.add_argument('--num_folds', type=int, default=10, help='Number of folds for cross-validation')
 parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID to use for training')
-parser.add_argument('--num_classes', type=int, default=4, help='Number of classes for classification')
 args = parser.parse_args()
 
 # Set hyperparameters from command-line arguments
@@ -28,7 +28,8 @@ epochs = args.epochs
 learning_rate = args.learning_rate
 num_folds = args.num_folds
 gpu_id = args.gpu_id
-num_classes = args.num_classes
+dataset_name = args.dataset
+num_classes = 4 if dataset_name == 'PPMI' else 2
 node_feature_dim = 116
 edge_feature_dim = 3
 
@@ -36,9 +37,9 @@ edge_feature_dim = 3
 device = torch.device(f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu')
 
 # Load data
-ppmi = torch.load('data/ppmi.pth')
-connectivities = ppmi['matrix'].numpy()
-labels = ppmi['label']
+dataset = torch.load(f'data/{dataset_name.lower()}.pth')
+connectivities = dataset['matrix'].numpy()
+labels = dataset['label']
 print(f'matrices: {connectivities.shape}, labels: {labels.shape}')
 print(f'Connectivity matrices shape: {connectivities.shape}, Labels shape: {labels.shape}')
 print(f'Connectivity matrices dtype: {connectivities.dtype}, Labels dtype: {labels.dtype}')
@@ -84,7 +85,7 @@ class ConnectivityDataset(Dataset):
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
         edge_attr = torch.tensor(np.array(edge_attr), dtype=torch.float)
         x = torch.tensor(np.eye(node_feature_dim), dtype=torch.float)  # Node features as identity matrix
-        y = torch.tensor(label, dtype=torch.long)  # Correctly define the label tensor as a single long tensor
+        y = label.type(torch.long)  # Correctly define the label tensor as a single long tensor
 
         data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y)
         return data
@@ -194,7 +195,7 @@ def train_gcn(train_loader, val_loader, epochs=200, lr=0.01):
                 all_preds.extend(pred.cpu().numpy())
                 all_labels.extend(data.y.cpu().numpy())
         accuracy = correct / len(val_loader.dataset)
-        precision = precision_score(all_labels, all_preds, average='weighted')
+        precision = precision_score(all_labels, all_preds, average='weighted', zero_division=0)
         recall = recall_score(all_labels, all_preds, average='weighted')
         f1 = f1_score(all_labels, all_preds, average='weighted')
         print(f'Validation Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}')
