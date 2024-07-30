@@ -19,28 +19,14 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', type=str, required=True, help='Directory containing the ADNI data.')
     parser.add_argument('--labels', type=str, required=True, help='Path to the labels file.')
-    parser.add_argument('--method', type=str, default='correlation', help='Use correlation matrices', choices=['correlation', 'curvature'])
     parser.add_argument('--destination', type=str, default='adni.pth', help='Save path for the processed data.')
-    parser.add_argument('--multi_class', action='store_true', help='Use multi-class labels.')
     args = parser.parse_args()
     return args
-
-def construct_graph(matrix, threshold=0.0):
-    G = nx.Graph()
-    num_nodes = matrix.shape[0]
-    for i in range(num_nodes):
-        G.add_node(i)
-    for i in range(num_nodes):
-        for j in range(i + 1, num_nodes):
-            if abs(matrix[i, j]) > threshold:
-                G.add_edge(i, j, weight=matrix[i, j])
-    return G
 
 def read_labels(path):
     df = pd.read_csv(path)
     keys = list(df['subject_id'].values)
-    labels_header = 'label' if args.multi_class else 'Label1'
-    labels = list(df[labels_header].values)
+    labels = list(df['Label1'].values)
     return dict(zip(keys, labels))
 
 
@@ -60,6 +46,7 @@ if __name__ == "__main__":
         connectivity_matrices.append(data[key])
         labels.append(labels_dict[key.split('-')[1].split('_')[0]])
     connectivity_matrices = torch.stack(connectivity_matrices)
+    
     print(f'Connectivity matrices: {len(connectivity_matrices)}, Labels: {len(labels)}')
     labels = np.array(labels)
     print(f'Connectivity matrices shape: {connectivity_matrices.shape}, Labels shape: {labels.shape}')

@@ -11,39 +11,38 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import argparse
 
 # Parse command-line arguments
-parser = argparse.ArgumentParser(description='Train a GCN model for Parkinson\'s disease classification.')
-parser.add_argument('--batch_size', type=int, default=16, help='Batch size for training')
+parser = argparse.ArgumentParser(description='Train a GCN model for neurodegenerative disease classification.')
+parser.add_argument('--dataset', type=str, default='ppmi', help='Dataset to use for training (ppmi, adni)')
+parser.add_argument('--batch_size', type=int, default=1, help='Batch size for training')
 parser.add_argument('--hidden_layer_size', type=int, default=512, help='Number of hidden units in each GCN layer')
+parser.add_argument('--num_hidden_layers', type=int, default=2, help='Number of hidden layers in the GCN')
 parser.add_argument('--epochs', type=int, default=300, help='Number of epochs for training')
 parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for training')
 parser.add_argument('--num_folds', type=int, default=10, help='Number of folds for cross-validation')
 parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID to use for training')
-parser.add_argument('--num_classes', type=int, default=4, help='Number of classes for classification')
 args = parser.parse_args()
 
 # Set hyperparameters from command-line arguments
+dataset_name = args.dataset
 batch_size = args.batch_size
 hidden_layer_size = args.hidden_layer_size
+num_hidden_layers = args.num_hidden_layers
 epochs = args.epochs
 learning_rate = args.learning_rate
 num_folds = args.num_folds
 gpu_id = args.gpu_id
-num_classes = args.num_classes
+
+num_classes = 4 if dataset_name == 'ppmi' else 2
 node_feature_dim = 116
-edge_feature_dim = 3
+edge_feature_dim = 4  # Updated to 4 to include the original connectivity values
 
 # Check if GPU is available and set device
 device = torch.device(f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu')
 
 # Load data
-ppmi = torch.load('data/ppmi.pth')
-connectivities = ppmi['matrix'].numpy()
-labels = ppmi['label']
-print(f'matrices: {connectivities.shape}, labels: {labels.shape}')
-print(f'Connectivity matrices shape: {connectivities.shape}, Labels shape: {labels.shape}')
-print(f'Connectivity matrices dtype: {connectivities.dtype}, Labels dtype: {labels.dtype}')
-print(f'Connectivity matrices min: {connectivities.min()}, Labels min: {labels.min()}')
-print(f'Connectivity matrices max: {connectivities.max()}, Labels max: {labels.max()}')
+dataset = torch.load(f'data/{dataset_name}.pth')
+connectivities = dataset['matrix'].numpy()
+labels = dataset['label']
 
 class ConnectivityDataset(Dataset):
     def __init__(self, connectivities, labels):
@@ -68,10 +67,10 @@ class ConnectivityDataset(Dataset):
         connectivity = self.connectivities[idx]
         label = self.labels[idx]
 
-        inter_matrix = self.extract_interhemispherical_matrix(connectivity)
-        intra_asym_matrix = self.extract_intrahemispherical_asymmetry_matrix(connectivity)
-        homotopic_matrix = self.extract_homotopic_matrix(connectivity)
-        combined_matrix = self.combine_feature_matrices(inter_matrix, intra_asym_matrix, homotopic_matrix)
+        inter_matrix = self.extract_interhemispheric_difference(connectivity)
+        intra_asym_matrix = self.extract_intrahemispheric_asymmetry_matrix(connectivity)
+        homotopic_matrix = self.extract_homotopic_difference(connectivity)
+        combined_matrix = self.combine_feature_matrices(connectivity, inter_matrix, intra_asym_matrix, homotopic_matrix)
 
         edge_index = []
         edge_attr = []
@@ -83,20 +82,32 @@ class ConnectivityDataset(Dataset):
 
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
         edge_attr = torch.tensor(np.array(edge_attr), dtype=torch.float)
-        x = torch.tensor(np.eye(node_feature_dim), dtype=torch.float)  # Node features as identity matrix
-        y = torch.tensor(label, dtype=torch.long)  # Correctly define the label tensor as a single long tensor
 
-        data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=y)
+        # Normalize edge attributes
+        edge_attr = (edge_attr - edge_attr.mean(dim=0, keepdim=True)) / (edge_attr.std(dim=0, keepdim=True) + 1e-6)
+
+        # Create node features with the same integer for corresponding regions in both hemispheres
+        node_features = torch.zeros(node_feature_dim, dtype=torch.float).unsqueeze(1)
+        for i in range(len(self.left_indices)):
+            node_features[self.left_indices[i]] = i
+            node_features[self.right_indices[i]] = i
+
+        # Normalize node features
+        node_features = (node_features - node_features.mean()) / (node_features.std() + 1e-6)
+
+        y = label.clone().detach()  # Correctly define the label tensor
+
+        data = Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, y=y)
         return data
 
-    def extract_interhemispherical_matrix(self, connectivity):
-        interhemispherical_matrix = np.zeros((58, 58))
+    def extract_interhemispheric_difference(self, connectivity):
+        interhemispheric_difference = np.zeros((58, 58))
         for i, li in enumerate(self.left_indices):
             for j, ri in enumerate(self.right_indices):
-                interhemispherical_matrix[i, j] = connectivity[li, ri]
-        return interhemispherical_matrix
+                interhemispheric_difference[i, j] = connectivity[li, ri] - connectivity[ri, li]
+        return interhemispheric_difference
 
-    def extract_intrahemispherical_asymmetry_matrix(self, connectivity):
+    def extract_intrahemispheric_asymmetry_matrix(self, connectivity):
         intra_asymmetry_matrix = np.zeros((node_feature_dim, node_feature_dim))
         left_hemisphere = connectivity[np.ix_(self.left_indices, self.left_indices)]
         right_hemisphere = connectivity[np.ix_(self.right_indices, self.right_indices)]
@@ -104,26 +115,28 @@ class ConnectivityDataset(Dataset):
         intra_asymmetry_matrix[np.ix_(self.right_indices, self.right_indices)] = np.abs(right_hemisphere - right_hemisphere.T)
         return intra_asymmetry_matrix
 
-    def extract_homotopic_matrix(self, connectivity):
-        homotopic_matrix = np.zeros((58, 58))
+    def extract_homotopic_difference(self, connectivity):
+        homotopic_difference = np.zeros((58, 58))
         for i, li in enumerate(self.left_indices):
             for j, ri in enumerate(self.right_indices):
-                homotopic_matrix[i, j] = connectivity[li, ri]
-        return homotopic_matrix
+                homotopic_difference[i, j] = connectivity[li, ri] - connectivity[ri, li]
+        return homotopic_difference
 
-    def combine_feature_matrices(self, inter_matrix, intra_asym_matrix, homotopic_matrix):
+    def combine_feature_matrices(self, connectivity, inter_matrix, intra_asym_matrix, homotopic_matrix):
         combined_matrix = np.zeros((node_feature_dim, node_feature_dim, edge_feature_dim))
         for i, li in enumerate(self.left_indices):
             for j, ri in enumerate(self.right_indices):
-                combined_matrix[li, ri, 0] = inter_matrix[i, j]
-                combined_matrix[li, ri, 2] = homotopic_matrix[i, j]
-        combined_matrix[:, :, 1] = intra_asym_matrix
+                combined_matrix[li, ri, 0] = connectivity[li, ri]  # Original connectivity
+                combined_matrix[li, ri, 1] = inter_matrix[i, j]
+                combined_matrix[li, ri, 3] = homotopic_matrix[i, j]
+        combined_matrix[:, :, 2] = intra_asym_matrix
         return combined_matrix
 
 class EdgeEnhancedGCNConv(MessagePassing):
     def __init__(self, in_channels, out_channels):
         super(EdgeEnhancedGCNConv, self).__init__(aggr='add')  # "Add" aggregation.
         self.lin = torch.nn.Linear(in_channels + edge_feature_dim, out_channels)  # Include edge features.
+        self.dropout = torch.nn.Dropout(p=0.5)  # Dropout for regularization
 
     def forward(self, x, edge_index, edge_attr):
         # x has shape [N, in_channels]
@@ -148,26 +161,31 @@ class EdgeEnhancedGCNConv(MessagePassing):
 
     def update(self, aggr_out):
         # aggr_out has shape [N, out_channels]
-        return self.lin(aggr_out)  # Linearly transform the aggregated messages
+        return self.dropout(self.lin(aggr_out))  # Linearly transform and apply dropout to the aggregated messages
 
 class GCN(torch.nn.Module):
-    def __init__(self, node_in_channels, hidden_channels, out_channels):
+    def __init__(self, node_in_channels, hidden_channels, out_channels, num_hidden_layers):
         super(GCN, self).__init__()
-        self.conv1 = EdgeEnhancedGCNConv(node_in_channels, hidden_channels)
-        self.conv2 = EdgeEnhancedGCNConv(hidden_channels, hidden_channels)
+        self.convs = torch.nn.ModuleList()
+        self.convs.append(EdgeEnhancedGCNConv(node_in_channels, hidden_channels))
+        for _ in range(num_hidden_layers - 1):
+            self.convs.append(EdgeEnhancedGCNConv(hidden_channels, hidden_channels))
         self.lin = torch.nn.Linear(hidden_channels, out_channels)
+        self.dropout = torch.nn.Dropout(p=0.5)  # Dropout for regularization
 
     def forward(self, data):
         x, edge_index, edge_attr, batch = data.x.to(device), data.edge_index.to(device), data.edge_attr.to(device), data.batch.to(device)
-        x = self.conv1(x, edge_index, edge_attr)
-        x = F.relu(x)
-        x = self.conv2(x, edge_index, edge_attr)
+        for conv in self.convs:
+            x = conv(x, edge_index, edge_attr)
+            x = F.relu(x)
         x = global_mean_pool(x, batch)  # Global pooling for graph-level classification
+        x = self.dropout(x)
         x = self.lin(x)
         return F.log_softmax(x, dim=1)
 
 def train_gcn(train_loader, val_loader, epochs=200, lr=0.01):
-    model = GCN(node_in_channels=node_feature_dim, hidden_channels=hidden_layer_size, out_channels=num_classes).to(device)
+    model = GCN(node_in_channels=1, hidden_channels=hidden_layer_size, out_channels=num_classes, num_hidden_layers=num_hidden_layers).to(device)  # Updated input channel size to 1
+    print(f'Model Parameters: {sum(p.numel() for p in model.parameters())}')
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     for epoch in range(epochs):
@@ -176,6 +194,9 @@ def train_gcn(train_loader, val_loader, epochs=200, lr=0.01):
             optimizer.zero_grad()
             out = model(data)
             loss = F.nll_loss(out, data.y.to(device))
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f'Epoch {epoch+1}, Loss is NaN or Inf, stopping training.')
+                return
             loss.backward()
             optimizer.step()
 
@@ -183,19 +204,17 @@ def train_gcn(train_loader, val_loader, epochs=200, lr=0.01):
         
         # Validation step
         model.eval()
-        correct = 0
         all_preds = []
         all_labels = []
         with torch.no_grad():
             for data in val_loader:
                 out = model(data)
                 pred = out.argmax(dim=1)
-                correct += (pred == data.y.to(device)).sum().item()
                 all_preds.extend(pred.cpu().numpy())
                 all_labels.extend(data.y.cpu().numpy())
-        accuracy = correct / len(val_loader.dataset)
-        precision = precision_score(all_labels, all_preds, average='weighted')
-        recall = recall_score(all_labels, all_preds, average='weighted')
+        accuracy = accuracy_score(all_labels, all_preds)
+        precision = precision_score(all_labels, all_preds, average='weighted', zero_division=0)
+        recall = recall_score(all_labels, all_preds, average='weighted', zero_division=0)
         f1 = f1_score(all_labels, all_preds, average='weighted')
         print(f'Validation Accuracy: {accuracy:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}')
 
@@ -221,6 +240,14 @@ def cross_validation(dataset, num_folds=5):
         all_precisions.append(precision)
         all_recalls.append(recall)
         all_f1s.append(f1)
+
+        # Print average metrics after each fold
+        avg_accuracy = np.mean(all_accuracies)
+        avg_precision = np.mean(all_precisions)
+        avg_recall = np.mean(all_recalls)
+        avg_f1 = np.mean(all_f1s)
+        print(f'Average after Fold {fold} -> Accuracy: {avg_accuracy:.4f}, Precision: {avg_precision:.4f}, Recall: {avg_recall:.4f}, F1 Score: {avg_f1:.4f}')
+        
         fold += 1
 
     # Calculate and print overall metrics
@@ -228,7 +255,7 @@ def cross_validation(dataset, num_folds=5):
     avg_precision = np.mean(all_precisions)
     avg_recall = np.mean(all_recalls)
     avg_f1 = np.mean(all_f1s)
-    print(f'Overall Accuracy: {avg_accuracy:.4f}, Precision: {avg_precision:.4f}, Recall: {avg_recall:.4f}, F1 Score: {avg_f1:.4f}')
+    print(f'\nOverall Metrics -> Accuracy: {avg_accuracy:.4f}, Precision: {avg_precision:.4f}, Recall: {avg_recall:.4f}, F1 Score: {avg_f1:.4f}')
 
 dataset = ConnectivityDataset(connectivities, labels)
 cross_validation(dataset, num_folds=num_folds)
