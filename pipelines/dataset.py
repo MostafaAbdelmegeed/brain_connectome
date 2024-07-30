@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from torch_geometric.data import Data, Dataset
 from .functional_encoding import yeo_network
+from .curvature import process_matrix
 
 # def yeo_network(as_tensor=False):
 #     # Define the refined functional classes based on Yeo's 7 Network Parcellations
@@ -32,10 +33,13 @@ from .functional_encoding import yeo_network
 #         return one_hot_encodings
 
 
+
+
 # Define the Dataset class
 class ConnectivityDataset(Dataset):
     def __init__(self, connectivities, labels):
         self.connectivities = connectivities
+        self.curvatures = torch.tensor(np.array([process_matrix(matrix) for matrix in self.connectivities]), dtype=torch.float)
         self.node_num = len(connectivities[0])
         self.labels = labels
         self.left_indices, self.right_indices = self.get_hemisphere_indices()
@@ -58,6 +62,13 @@ class ConnectivityDataset(Dataset):
         if i in self.right_indices and j in self.right_indices:
             return True
         return False
+
+    def isLeftIntra(self, i,j):
+        return i in self.left_indices and j in self.left_indices
+
+    def isRightIntra(self, i, j):
+        return i in self.right_indices and j in self.right_indices
+
     
     def isHomo(self,i,j):
         return i//2 == j//2 and abs(i-j) == 1
@@ -67,6 +78,7 @@ class ConnectivityDataset(Dataset):
 
     def __getitem__(self, idx):
         connectivity = self.connectivities[idx]
+        curvatute = self.curvatures[idx]
         label = self.labels[idx]
         edge_index = []
         edge_attr = []
@@ -75,7 +87,7 @@ class ConnectivityDataset(Dataset):
         for j in range(connectivity.shape[0]):
             for k in range(connectivity.shape[0]):
                 edge_index.append([j, k])
-                edge_attr.append([connectivity[j, k], self.isInter(j, k), self.isIntra(j, k), self.isHomo(j, k)])
+                edge_attr.append([connectivity[j, k], self.isInter(j, k), self.isLeftIntra(j,k), self.isRightIntra(j,k), self.isHomo(j, k)])
 
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
         edge_attr = torch.tensor(np.array(edge_attr), dtype=torch.float)
