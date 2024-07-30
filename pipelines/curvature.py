@@ -1,7 +1,6 @@
 import networkx as nx
 import math
 import numpy as np
-from concurrent.futures import ProcessPoolExecutor
 
 class NewBRicci:
     
