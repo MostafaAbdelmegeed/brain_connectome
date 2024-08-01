@@ -38,7 +38,7 @@ from tqdm import tqdm
 
 
 # Define the Dataset class
-class ConnectivityDataset(Dataset):
+class ConnectivityWCurvaturesDataset(Dataset):
     def __init__(self, connectivities, curvatures, labels):
         self.connectivities = connectivities
         self.curvatures = curvatures
@@ -95,7 +95,68 @@ class ConnectivityDataset(Dataset):
         edge_attr = torch.tensor(np.array(edge_attr), dtype=torch.float)
         node_features = torch.tensor(np.array(node_attr), dtype=torch.float)
         y = label.type(torch.long)
-        # print(f'node_features: {node_features.shape}, edge_index: {edge_index.shape}, edge_attr: {edge_attr.shape}, y: {y}')
+        print(f'node_features: {node_features.shape}, edge_index: {edge_index.shape}, edge_attr: {edge_attr.shape}, y: {y}')
+        data = Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, y=y)
+        return data
+    
+
+# Define the Dataset class
+class ConnectivityDataset(Dataset):
+    def __init__(self, connectivities, labels):
+        self.connectivities = connectivities
+        self.node_num = len(connectivities[0])
+        self.labels = labels
+        self.left_indices, self.right_indices = self.get_hemisphere_indices()
+
+    def get_hemisphere_indices(self):
+        left_indices = [i for i in range(self.node_num) if i % 2 == 0]
+        right_indices = [i for i in range(self.node_num) if i % 2 != 0]
+        return left_indices, right_indices
+
+    def isInter(self,i,j):
+        if i in self.left_indices and j in self.right_indices:
+            return True
+        if i in self.right_indices and j in self.left_indices:
+            return True
+        return False
+
+    def isIntra(self,i,j):
+        if i in self.left_indices and j in self.left_indices:
+            return True
+        if i in self.right_indices and j in self.right_indices:
+            return True
+        return False
+
+    def isLeftIntra(self, i,j):
+        return i in self.left_indices and j in self.left_indices
+
+    def isRightIntra(self, i, j):
+        return i in self.right_indices and j in self.right_indices
+
+    
+    def isHomo(self,i,j):
+        return i//2 == j//2 and abs(i-j) == 1
+
+    def __len__(self):
+        return len(self.connectivities)
+
+    def __getitem__(self, idx):
+        connectivity = self.connectivities[idx]
+        label = self.labels[idx]
+        edge_index = []
+        edge_attr = []
+        node_attr = yeo_network(as_tensor=False)
+
+        for j in range(connectivity.shape[0]):
+            for k in range(connectivity.shape[0]):
+                edge_index.append([j, k])
+                edge_attr.append([connectivity[j, k], self.isInter(j, k), self.isLeftIntra(j,k), self.isRightIntra(j,k), self.isHomo(j, k)])
+
+        edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+        edge_attr = torch.tensor(np.array(edge_attr), dtype=torch.float)
+        node_features = torch.tensor(np.array(node_attr), dtype=torch.float)
+        y = label.type(torch.long)
+        print(f'node_features: {node_features.shape}, edge_index: {edge_index.shape}, edge_attr: {edge_attr.shape}, y: {y}')
         data = Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, y=y)
         return data
     
