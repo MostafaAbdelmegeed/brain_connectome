@@ -18,6 +18,8 @@ device = torch.device(f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 torch.set_default_device(device)
 
+dataset_name = 'ppmi'
+
 
 
 def yeo_network():
@@ -96,7 +98,7 @@ class ConnectivityDataset(Dataset):
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
         edge_attr = torch.tensor(np.array(edge_attr), dtype=torch.float)
         y = label.type(torch.long)
-        data = Data(x=None, edge_index=edge_index, edge_attr=edge_attr, y=y)
+        data = Data(x=None, edge_index=edge_index, edge_attr=edge_attr, y=y, num_nodes=connectivity.shape[0])
         return data
     
 
@@ -106,7 +108,7 @@ def collate_fn(batch, device='cpu'):
 
 
 
-data = torch.load('../data/ppmi.pth')
+data = torch.load(f'data/{dataset_name}.pth')
 connectivities = data['matrix']
 labels = data['label']
 print(f'Connectivities: {connectivities.shape}, Labels: {labels.shape}')
@@ -288,22 +290,20 @@ generator = torch.Generator(device=device)
 
 
 # Hyperparameters
-n_folds = 5
-epochs = 10
+n_folds = 10
+epochs = 300
 batch_size = 1
 learning_rate = 0.001
-hidden_layer_size = 64
+hidden_dim = 512
 dropout = 0.5
-patience = 10
-seed = 42
+patience = 30
+seed = 10
 test_size = 0.2
-gpu_id = 0
 
 
 n_nodes = 116
-hidden_dim = 64
 edge_dim = 5
-out_dim = 4
+out_dim = 4 if dataset_name == 'ppmi' else 2
 # Cross-validation setup
 kf = KFold(n_splits=n_folds, shuffle=True, random_state=seed)
 # Initialize lists to store metrics for all folds
