@@ -388,13 +388,13 @@ def check_for_nans(tensor, tensor_name):
 
 
 # Hyperparameters
-n_folds = 10
-epochs = 300
+n_folds = 5
+epochs = 30
 batch_size = 1
 learning_rate = 0.00001
 hidden_dim = 64
 dropout = 0.5
-patience = 30
+patience = 10
 
 test_size = 0.2
 
