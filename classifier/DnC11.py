@@ -177,6 +177,7 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset)):
             optimizer.zero_grad()
             output = model(data.x, data.edge_index, data.edge_attr, data.batch)
             loss = criterion(output, data.y)
+            print(f'output shape: {output.shape}, data.y shape: {data.y.shape}')
             loss.backward()
             optimizer.step()
 
