@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.nn import Module, Parameter, Linear
-from torch_geometric.nn import MessagePassing, global_mean_pool
+from torch_geometric.nn import MessagePassing, global_mean_pool, global_max_pool, global_add_pool
 import numpy as np
 import math
 from sklearn.model_selection import KFold, train_test_split
@@ -13,21 +13,41 @@ from sklearn.metrics import f1_score, accuracy_score, precision_score
 from torch_geometric.data import Batch
 import scipy.sparse as sp
 import datetime
+import argparse
 
 
 def print_with_timestamp(message):
     timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     print(f"{timestamp}\t{message}")
 
-gpu_id = 0
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train GNN on connectivity data")
+    parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID to use')
+    parser.add_argument('--dataset_name', type=str, default='ppmi', help='Name of the dataset')
+    parser.add_argument('--seed', type=int, default=10, help='Random seed')
+    parser.add_argument('--n_folds', type=int, default=5, help='Number of folds for cross-validation')
+    parser.add_argument('--epochs', type=int, default=30, help='Number of epochs')
+    parser.add_argument('--batch_size', type=int, default=1, help='Batch size')
+    parser.add_argument('--learning_rate', type=float, default=0.00001, help='Learning rate')
+    parser.add_argument('--hidden_dim', type=int, default=64, help='Hidden dimension size')
+    parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
+    parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping')
+    parser.add_argument('--test_size', type=float, default=0.2, help='Test size for splitting data')
+    parser.add_argument('--pooling', type=str, default='mean', help='Pooling method')
+    return parser.parse_args()
+
+args = parse_args()
+
+gpu_id = args.gpu_id
 
 device = torch.device(f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu')
 torch.set_default_device(device)
 
-dataset_name = 'ppmi'
+dataset_name = args.dataset_name
 
 
-seed = 10
+seed = args.seed
 np.random.seed(seed)
 torch.manual_seed(seed)
 if torch.cuda.is_available():
@@ -369,10 +389,15 @@ class Net(torch.nn.Module):
         x, edge_attr = self.node_conv2(x, edge_attr, e_adj, n_adj, T)
 
 
-        x = global_mean_pool(x, data.batch)
+        if pooling == 'mean':
+            x = global_mean_pool(x, data.batch)
+        elif pooling == 'max':
+            x = global_max_pool(x, data.batch)
+        elif pooling == 'add':
+            x = global_add_pool(x, data.batch)
         x = self.lin(x)
 
-        return x
+        return F.log_softmax(x, dim=1)
     
 
 
@@ -388,15 +413,16 @@ def check_for_nans(tensor, tensor_name):
 
 
 # Hyperparameters
-n_folds = 5
-epochs = 30
-batch_size = 1
-learning_rate = 0.00001
-hidden_dim = 64
-dropout = 0.5
-patience = 10
+n_folds = args.n_folds
+epochs = args.epochs
+batch_size = args.batch_size
+learning_rate = args.learning_rate
+hidden_dim = args.hidden_dim
+dropout = args.dropout
+patience = args.patience
+pooling = args.pooling
 
-test_size = 0.2
+test_size = args.test_size
 
 
 n_nodes = 116
