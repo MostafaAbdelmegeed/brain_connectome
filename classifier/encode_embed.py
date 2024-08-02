@@ -39,6 +39,8 @@ def parse_args():
 
 args = parse_args()
 
+print_with_timestamp(f"Arguments: {args}")
+
 gpu_id = args.gpu_id
 
 device = torch.device(f'cuda:{gpu_id}' if torch.cuda.is_available() else 'cpu')
