@@ -35,6 +35,7 @@ def parse_args():
     parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping')
     parser.add_argument('--test_size', type=float, default=0.2, help='Test size for splitting data')
     parser.add_argument('--pooling', type=str, default='mean', help='Pooling method')
+    parser.add_argument('--percentile', type=float, default=0.9, help='Percentile for thresholding')
     return parser.parse_args()
 
 args = parse_args()
@@ -80,11 +81,15 @@ def yeo_network():
     return functional_groups
 
 class ConnectivityDataset(Dataset):
-    def __init__(self, connectivities, labels):
-        self.connectivities = connectivities
-        self.node_num = len(connectivities[0])
-        self.labels = labels
+    def __init__(self, data):
+        self.connectivities = data['connectivity']
+        self.node_adjacencies = data['node_adj']
+        self.edge_adjacencies = data['edge_adj']
+        self.transition = data['transition']
+        self.labels = data['label']
+        self.node_num = self.connectivities.shape[1]
         self.left_indices, self.right_indices = self.get_hemisphere_indices()
+        
 
     def get_hemisphere_indices(self):
         left_indices = [i for i in range(self.node_num) if i % 2 == 0]
@@ -108,29 +113,31 @@ class ConnectivityDataset(Dataset):
 
     def __getitem__(self, idx):
         connectivity = self.connectivities[idx]
+        node_adj = self.node_adjacencies[idx]
+        edge_adj = self.edge_adjacencies[idx]
+        transition = self.transition[idx]
+        # Ensure coalesced and print for debugging
+        edge_adj = edge_adj.coalesce()
+        transition = transition.coalesce()
         label = self.labels[idx]
         edge_index = []
         edge_attr = []
         for j in range(connectivity.shape[0]):
             for k in range(j + 1, connectivity.shape[0]):
+                if node_adj[j, k] == 0:
+                    continue
                 edge_index.append([j, k])
                 edge_attr.append([connectivity[j, k], self.isInter(j, k), self.isLeftIntra(j, k), self.isRightIntra(j, k), self.isHomo(j, k)])
         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
         edge_attr = torch.tensor(edge_attr, dtype=torch.float)
         y = label.type(torch.long)
-        data = Data(x=None, edge_index=edge_index, edge_attr=edge_attr, y=y, num_nodes=connectivity.shape[0])
+        data = Data(x=torch.eye(connectivity.shape[0], dtype=torch.float), edge_index=edge_index, edge_attr=edge_attr, y=y, num_nodes=connectivity.shape[0], node_adj=node_adj, edge_adj=edge_adj, transition=transition)
         return data
 
     
 
+data = torch.load(f'data/{dataset_name}_coembed_p{int(args.percentile*100)}.pth')
 
-data = torch.load(f'data/{dataset_name}.pth')
-connectivities = data['matrix']
-print_with_timestamp(f'Connectivities mean: {connectivities.mean()}, std: {connectivities.std()}, min: {connectivities.min()}, max: {connectivities.max()}')
-
-
-connectivities = (connectivities - connectivities.mean()) / (connectivities.std()+ 1e-8)
-labels = data['label']
 functional_groups = yeo_network()
 
 class BrainEncoding(MessagePassing):
@@ -141,7 +148,7 @@ class BrainEncoding(MessagePassing):
         self.hidden_dim = hidden_dim
         self.atlas = atlas
         # Linear layer to transform the one-hot encoding
-        self.linear = Linear(self.hidden_dim + self.atlas // 2, self.hidden_dim)
+        self.linear = Linear(self.num_nodes + self.hidden_dim + self.atlas // 2, self.hidden_dim)
         self.encoding = self.create_encoding()
     
     @property
@@ -155,7 +162,6 @@ class BrainEncoding(MessagePassing):
                 region_encoding = [0] * (self.atlas // 2)
                 region_encoding[node // 2] = 1 if node % 2 == 0 else -1
                 encoding[node] = torch.tensor(region_encoding + self.get_group_encoding(group).tolist())
-        encoding = self.linear(encoding)
         return encoding
 
     def get_group_encoding(self, group):
@@ -164,14 +170,14 @@ class BrainEncoding(MessagePassing):
         encoding[hash(group) % self.hidden_dim] = 1
         return encoding
 
-    def forward(self, batch):
-        batch_size = batch.num_graphs
-        encodings = self.encoding.repeat(batch_size, 1, 1).squeeze(0)
-        if batch.x is None:
-            batch.x = encodings
+    def forward(self, data):
+        if data.x is not None:
+            encodings = torch.cat([data.x, self.encoding], dim=-1)
         else:
-            batch.x = torch.cat([batch.x, encodings], dim=-1)
-        return batch
+            encodings = self.encoding
+        encodings = self.linear(encodings)
+        data.x = encodings
+        return data
 
 class AlternateConvolution(Module):
     """
@@ -247,110 +253,6 @@ class AlternateConvolution(Module):
         return self.__class__.__name__ + ' (' + str(self.in_features_v) + ' -> ' + str(self.out_features_v) + '), (' + str(self.in_features_e) + ' -> ' + str(self.out_features_e) + ')'
 
 
-def sparse_mx_to_torch_sparse_tensor(sparse_mx, device=None):
-    """Convert a scipy sparse matrix to a torch sparse tensor."""
-    sparse_mx = sparse_mx.tocoo().astype(np.float32)
-    indices = torch.tensor([sparse_mx.row, sparse_mx.col], dtype=torch.int64, device=device)
-    values = torch.tensor(sparse_mx.data, dtype=torch.float32, device=device)
-    shape = torch.Size(sparse_mx.shape)
-    return torch.sparse_coo_tensor(indices, values, shape)
-
-def node_adjacency_matrix(edge_index, num_nodes):
-    """Create a node adjacency matrix from an edge index."""
-    # Initialize an adjacency matrix with zeros on the GPU
-    adj_matrix = torch.zeros((num_nodes, num_nodes), dtype=torch.float, device=edge_index.device)
-    # Iterate over the edges and set the corresponding entries in the adjacency matrix to 1
-    for i in range(edge_index.shape[1]):
-        node1 = edge_index[0, i]
-        node2 = edge_index[1, i]
-        adj_matrix[node1, node2] = 1
-        adj_matrix[node2, node1] = 1  # If the graph is undirected
-
-    # Ensure the diagonal is zero
-    adj_matrix.fill_diagonal_(0)
-    
-    return adj_matrix
-    # # Initialize an adjacency matrix with zeros
-    # adj_matrix = torch.zeros((num_nodes, num_nodes), dtype=torch.float)
-    
-    # # Set the corresponding entries in the adjacency matrix to 1
-    # adj_matrix[edge_index[0], edge_index[1]] = 1
-    # adj_matrix[edge_index[1], edge_index[0]] = 1  # If the graph is undirected
-    
-    # return adj_matrix
-
-    
-def edge_adjacency_matrix(node_adj):
-    """Create an edge adjacency matrix from a node adjacency matrix."""
-    node_adj.fill_diagonal_(0)
-    num_nodes = node_adj.shape[0]
-    num_edges = num_nodes * (num_nodes - 1) // 2
-    edge_adj = torch.ones((num_edges, num_edges), dtype=torch.float, device=node_adj.device) - torch.eye(num_edges, device=node_adj.device)
-    return edge_adj
-    # # Ensure node_adj is on CPU and convert to numpy
-    # node_adj = node_adj.cpu().numpy()
-    
-    # # Fill the diagonal with zeros
-    # np.fill_diagonal(node_adj, 0)
-    
-    # # Get the upper triangular part of the adjacency matrix
-    # edge_index = np.triu(node_adj).nonzero()
-    
-    # # Number of edges
-    # num_edge = len(edge_index[0])
-    
-    # # Initialize the edge adjacency matrix with zeros
-    # edge_adj = np.zeros((num_edge, num_edge))
-    
-    # # Fill the edge adjacency matrix
-    # for i in range(num_edge):
-    #     for j in range(i, num_edge):
-    #         if np.intersect1d(edge_index[0][i], edge_index[1][j]).size > 0:
-    #             edge_adj[i, j] = 1
-    
-    # # Make the matrix symmetric and fill the diagonal with ones
-    # edge_adj = edge_adj + edge_adj.T
-    # np.fill_diagonal(edge_adj, 1)
-    
-    # # Convert to sparse matrix and then to torch sparse tensor
-    # return sparse_mx_to_torch_sparse_tensor(sp.csr_matrix(edge_adj))
-
-
-
-def transition_matrix(node_adj):
-    """Create a transition matrix from a node adjacency matrix."""
-    node_adj.fill_diagonal_(0)
-    edge_index = torch.nonzero(torch.triu(node_adj)).t()
-    num_edges = edge_index.shape[1]
-    row_index = edge_index.t().flatten()
-    col_index = torch.repeat_interleave(torch.arange(num_edges, device=node_adj.device), 2)
-    data = torch.ones(num_edges * 2, device=node_adj.device)
-    T = torch.sparse_coo_tensor(torch.stack([row_index, col_index]), data, (node_adj.shape[0], num_edges))
-    return T
-    # # Ensure node_adj is on CPU and convert to numpy
-    # node_adj = node_adj.cpu().numpy()
-    
-    # # Fill the diagonal with zeros
-    # np.fill_diagonal(node_adj, 0)
-    
-    # # Get the upper triangular part of the adjacency matrix
-    # edge_index = np.triu(node_adj).nonzero()
-    
-    # # Number of edges
-    # num_edge = len(edge_index[0])
-    
-    # # Create row and column indices for the transition matrix
-    # row_index = np.repeat(np.arange(num_edge), 2)
-    # col_index = np.hstack([edge_index[0], edge_index[1]])
-    
-    # # Data values for the transition matrix
-    # data = np.ones(len(row_index))
-    
-    # # Create the transition matrix as a sparse matrix
-    # T = sp.csr_matrix((data, (row_index, col_index)), shape=(num_edge, node_adj.shape[0]))
-    
-    # return sparse_mx_to_torch_sparse_tensor(T)
-
 
 
 class Net(torch.nn.Module):
@@ -369,27 +271,18 @@ class Net(torch.nn.Module):
         return next(self.parameters()).device
 
     def forward(self, data):
-        batch_size = data.num_graphs
-        num_nodes = data.num_nodes//batch_size
-        num_edges = data.num_edges//batch_size
-
         data = self.brain_encoding(data)
-        n_adj = node_adjacency_matrix(data.edge_index, num_nodes)
-        e_adj = edge_adjacency_matrix(n_adj)
-        T = transition_matrix(n_adj)
-        x, edge_attr = self.node_conv1(data.x, data.edge_attr, e_adj, n_adj, T)        
+        x, edge_attr = self.node_conv1(data.x, data.edge_attr, data.edge_adj, data.node_adj, data.transition)        
         x, edge_attr = F.relu(x), F.relu(edge_attr)
         x = F.dropout(x, p=self.dropout, training=self.training)
         edge_attr = F.dropout(edge_attr, p=self.dropout, training=self.training)
 
-        x, edge_attr = self.edge_conv1(x, edge_attr, e_adj, n_adj, T)
+        x, edge_attr = self.edge_conv1(x, edge_attr, data.edge_adj, data.node_adj, data.transition)
         x, edge_attr = F.relu(x), F.relu(edge_attr)
         x = F.dropout(x, p=self.dropout, training=self.training)
         edge_attr = F.dropout(edge_attr, p=self.dropout, training=self.training)
 
-
-        x, edge_attr = self.node_conv2(x, edge_attr, e_adj, n_adj, T)
-
+        x, edge_attr = self.node_conv2(x, edge_attr, data.edge_adj, data.node_adj, data.transition)
 
         if pooling == 'mean':
             x = global_mean_pool(x, data.batch)
@@ -404,7 +297,7 @@ class Net(torch.nn.Module):
 
 
 
-dataset = ConnectivityDataset(connectivities, labels)
+dataset = ConnectivityDataset(data)
 generator = torch.Generator(device=device)
 
 
@@ -501,7 +394,7 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset)):
     for data in test_loader:
         data = data.to(device)
         with torch.no_grad():
-            output = model(data.x, data.edge_index, data.edge_attr, data.batch)
+            output = model(data)
             pred = output.argmax(dim=1)
             preds.extend(pred.cpu().numpy())
             labels.extend(data.y.cpu().numpy())
