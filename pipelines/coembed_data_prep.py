@@ -87,19 +87,8 @@ def process_matrices(dataloader, device, percentile=0.9):
         edge_adj_list.append(e_adj.cpu())
         trans_list.append(t.cpu())
 
-        # # Print message after each iteration to debug shapes
-        # print(f"Processed {i + 1}/{len(dataloader)}")
-        # print(f"new_conn shape: {new_conn.shape}, non-zero elements: {new_conn.nonzero().size(0)}")
-        # print(f"n_adj shape: {n_adj.shape}, non-zero elements: {n_adj.nonzero().size(0)}")
-        # print(f"e_adj shape: {e_adj.shape}, non-zero elements: {e_adj._nnz()}")
-        # print(f"t shape: {t.shape}, non-zero elements: {t._nnz()}")
+    return new_connectivity_list, node_adj_list, edge_adj_list, trans_list
 
-    new_connectivity = torch.stack(new_connectivity_list)
-    node_adj = torch.stack(node_adj_list)
-    edge_adj = torch.stack(edge_adj_list)
-    trans = torch.stack(trans_list)
-
-    return new_connectivity, node_adj, edge_adj, trans
 
 def main():
     args = parse_args()

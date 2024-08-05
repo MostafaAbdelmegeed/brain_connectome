@@ -4,8 +4,8 @@ from torch_geometric.loader import DataLoader
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.nn import Module, Parameter, Linear
-from torch_geometric.nn import MessagePassing, global_mean_pool, global_max_pool, global_add_pool
+from torch.nn import Module, Parameter, Linear, Dropout, LayerNorm, ReLU
+from torch_geometric.nn import MessagePassing, global_mean_pool, global_max_pool, global_add_pool, GATConv
 import numpy as np
 import math
 from sklearn.model_selection import KFold, train_test_split
@@ -87,10 +87,9 @@ class ConnectivityDataset(Dataset):
         self.edge_adjacencies = data['edge_adj']
         self.transition = data['transition']
         self.labels = data['label']
-        self.node_num = self.connectivities.shape[1]
+        self.node_num = self.connectivities[0].shape[0]
         self.left_indices, self.right_indices = self.get_hemisphere_indices()
-        
-
+    
     def get_hemisphere_indices(self):
         left_indices = [i for i in range(self.node_num) if i % 2 == 0]
         right_indices = [i for i in range(self.node_num) if i % 2 != 0]
@@ -107,6 +106,12 @@ class ConnectivityDataset(Dataset):
 
     def isHomo(self, i, j):
         return i // 2 == j // 2 and abs(i - j) == 1
+    
+    def edge_features_count(self):
+        return 5
+    
+    def node_features_count(self):
+        return 116
 
     def __len__(self):
         return len(self.connectivities)
@@ -134,23 +139,89 @@ class ConnectivityDataset(Dataset):
         data = Data(x=torch.eye(connectivity.shape[0], dtype=torch.float), edge_index=edge_index, edge_attr=edge_attr, y=y, num_nodes=connectivity.shape[0], node_adj=node_adj, edge_adj=edge_adj, transition=transition)
         return data
 
+class SimpleConnectivityDataset(Dataset):
+    def __init__(self, data):
+        self.connectivities = data['connectivity']
+        self.node_adjacencies = data['node_adj']
+        self.edge_adjacencies = data['edge_adj']
+        self.transition = data['transition']
+        self.labels = data['label']
+        self.node_num = self.connectivities[0].shape[0]
+        self.left_indices, self.right_indices = self.get_hemisphere_indices()
     
+    def get_hemisphere_indices(self):
+        left_indices = [i for i in range(self.node_num) if i % 2 == 0]
+        right_indices = [i for i in range(self.node_num) if i % 2 != 0]
+        return left_indices, right_indices
+
+    def isInter(self, i, j):
+        return (i in self.left_indices and j in self.right_indices) or (i in self.right_indices and j in self.left_indices)
+
+    def isLeftIntra(self, i, j):
+        return i in self.left_indices and j in self.left_indices
+
+    def isRightIntra(self, i, j):
+        return i in self.right_indices and j in self.right_indices
+
+    def isHomo(self, i, j):
+        return i // 2 == j // 2 and abs(i - j) == 1
+    
+    def edge_features_count(self):
+        return 1
+    
+    def node_features_count(self):
+        return 0
+
+    def __len__(self):
+        return len(self.connectivities)
+
+    def __getitem__(self, idx):
+        connectivity = self.connectivities[idx]
+        node_adj = self.node_adjacencies[idx]
+        edge_adj = self.edge_adjacencies[idx]
+        transition = self.transition[idx]
+        # Ensure coalesced and print for debugging
+        edge_adj = edge_adj.coalesce()
+        transition = transition.coalesce()
+        label = self.labels[idx]
+        edge_index = []
+        edge_attr = []
+        for j in range(connectivity.shape[0]):
+            for k in range(j + 1, connectivity.shape[0]):
+                if node_adj[j, k] == 0:
+                    continue
+                edge_index.append([j, k])
+                edge_attr.append(connectivity[j, k])
+        edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+        edge_attr = torch.tensor(edge_attr, dtype=torch.float)
+        y = label.type(torch.long)
+        data = Data(x=torch.eye(None, dtype=torch.float), edge_index=edge_index, edge_attr=edge_attr, y=y, num_nodes=connectivity.shape[0], node_adj=node_adj, edge_adj=edge_adj, transition=transition)
+        return data
 
 data = torch.load(f'data/{dataset_name}_coembed_p{int(args.percentile*100)}.pth')
 
 functional_groups = yeo_network()
 
 class BrainEncoding(MessagePassing):
-    def __init__(self, functional_groups, num_nodes, hidden_dim, atlas=116):
+    def __init__(self, functional_groups, num_nodes, hidden_dim, atlas=116, dropout_rate=0.6, heads=1):
         super(BrainEncoding, self).__init__()
         self.functional_groups = functional_groups
         self.num_nodes = num_nodes
         self.hidden_dim = hidden_dim
         self.atlas = atlas
+        self.heads = heads
+        
         # Linear layer to transform the one-hot encoding
         self.linear = Linear(self.num_nodes + self.hidden_dim + self.atlas // 2, self.hidden_dim)
+        self.relu = ReLU()
+        self.dropout_rate = dropout_rate
+        self.dropout = Dropout(dropout_rate)
+        
+        # Graph attention layer
+        self.gat = GATConv(self.hidden_dim, self.hidden_dim // self.heads, heads=self.heads, dropout=self.dropout_rate)
+        
         self.encoding = self.create_encoding()
-    
+
     @property
     def device(self):
         return next(self.parameters()).device
@@ -175,7 +246,14 @@ class BrainEncoding(MessagePassing):
             encodings = torch.cat([data.x, self.encoding], dim=-1)
         else:
             encodings = self.encoding
-        encodings = self.linear(encodings)
+
+        # Apply linear transformation and ReLU activation
+        encodings = self.relu(self.linear(encodings))
+        encodings = self.dropout(encodings)
+        
+        # Apply graph attention layer
+        encodings = self.gat(encodings, data.edge_index)
+        
         data.x = encodings
         return data
 
@@ -321,7 +399,7 @@ test_size = args.test_size
 
 
 n_nodes = 116
-edge_dim = 5
+edge_dim = dataset.edge_features_count()
 out_dim = 4 if dataset_name == 'ppmi' else 2
 # Cross-validation setup
 kf = KFold(n_splits=n_folds, shuffle=True, random_state=seed)
@@ -343,7 +421,8 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset)):
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, generator=generator)
 
     model = Net(functional_groups, n_nodes, hidden_dim, edge_dim, out_dim, dropout=dropout).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-3)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
     criterion = torch.nn.CrossEntropyLoss()
 
     best_val_loss = float('inf')
