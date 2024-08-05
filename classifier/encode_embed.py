@@ -14,6 +14,7 @@ from torch_geometric.data import Batch
 import scipy.sparse as sp
 import datetime
 import argparse
+from torch.utils.tensorboard import SummaryWriter
 
 
 def print_with_timestamp(message):
@@ -406,6 +407,10 @@ kf = KFold(n_splits=n_folds, shuffle=True, random_state=seed)
 # Initialize lists to store metrics for all folds
 all_fold_metrics = {'accuracy': [], 'precision': [], 'f1': []}
 
+# TensorBoard writer
+writer = SummaryWriter(log_dir=f'runs/{dataset_name}_ee_s{seed}')
+writer.add_text('Arguments', str(args))
+
 # Training and evaluation loop
 for fold, (train_index, test_index) in enumerate(kf.split(dataset)):
     print_with_timestamp(f"Fold {fold + 1}/{n_folds}")
@@ -430,6 +435,7 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset)):
 
     for epoch in range(epochs):
         model.train()
+        train_loss = 0
         for data in train_loader:
             data = data.to(device)
             optimizer.zero_grad()
@@ -439,6 +445,10 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset)):
             # Gradient clipping
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+            train_loss += loss.item()
+        
+        train_loss /= len(train_loader)
+        writer.add_scalar(f'Fold_{fold+1}/Train_Loss', train_loss, epoch)
 
         # Validate the model
         model.eval()
@@ -449,7 +459,7 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset)):
                 output = model(data)
                 val_loss += criterion(output, data.y).item()
         val_loss /= len(val_loader)
-        
+        writer.add_scalar(f'Fold_{fold+1}/Val_Loss', val_loss, epoch)
         print_with_timestamp(f"Epoch {epoch + 1}/{epochs}, Train Loss: {loss.item()}, Val Loss: {val_loss}")
 
         # Early stopping check
@@ -465,7 +475,6 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset)):
 
     # Load the best model state
     model.load_state_dict(best_model_state)
-
     # Evaluate the model on the test set
     model.eval()
     preds = []
@@ -481,6 +490,9 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset)):
     acc = accuracy_score(labels, preds)
     precision = precision_score(labels, preds, average='weighted', zero_division=0)
     f1 = f1_score(labels, preds, average='weighted')
+    writer.add_scalar(f'Fold_{fold+1}/Test_Accuracy', acc, epoch)
+    writer.add_scalar(f'Fold_{fold+1}/Test_Precision', precision, epoch)
+    writer.add_scalar(f'Fold_{fold+1}/Test_F1', f1, epoch)
     print_with_timestamp(f"Fold {fold + 1} Metrics: Accuracy: {acc}, Precision: {precision}, F1 Score: {f1}")
 
     # Store metrics for the current fold
@@ -501,3 +513,5 @@ final_f1 = np.mean(all_fold_metrics['f1'])
 
 print_with_timestamp("Training completed.")
 print_with_timestamp(f"Final Metrics:\nAccuracy: {final_accuracy}\nPrecision: {final_precision}\nF1 Score: {final_f1}")
+# Close the TensorBoard writer
+writer.close()
