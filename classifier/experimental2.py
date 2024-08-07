@@ -331,11 +331,11 @@ class Net(torch.nn.Module):
     def __init__(self, functional_groups, num_nodes, hidden_dim, edge_dim, out_dim, heads=1, atlas=116, dropout=0.5, pooling='mean', filter_size=6):
         super(Net, self).__init__()
         self.brain_encoding = BrainEncoding(functional_groups=functional_groups, num_nodes=num_nodes, hidden_dim=hidden_dim, atlas=atlas)
+        self.pan = PANConv(hidden_dim, hidden_dim, filter_size)
         self.conv1 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=True)
         self.conv2 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=False)
+        self.gat = GATv2Conv(hidden_dim, hidden_dim//2, heads=heads, dropout=dropout, edge_dim=edge_dim)
         
-        # self.gat = GATv2Conv(hidden_dim, hidden_dim//4, heads=heads, dropout=dropout, edge_dim=edge_dim)
-        self.pan = PANConv(hidden_dim, hidden_dim//2, filter_size)
         self.lin = torch.nn.Linear(hidden_dim//2, out_dim)
         self.dropout = dropout
         self.pooling = pooling
@@ -346,7 +346,26 @@ class Net(torch.nn.Module):
     def forward(self, data):
         #print_with_timestamp(f'data.x shape: {data.x.size()}, data.edge_attr shape: {data.edge_attr.size()}, data.edge_index shape: {data.edge_index.size()}, data.edge_adj shape: {data.edge_adj.size()}, data.node_adj shape: {data.node_adj.size()}, data.transition shape: {data.transition.size()}')
         data = self.brain_encoding(data)
-        x, edge_attr = self.conv1(data.x, data.edge_attr, data.edge_adj, data.node_adj, data.transition)
+        x = []
+        edge_adj = []
+        num_nodes = data.num_nodes//data.num_graphs
+        num_edges = data.edge_index.size(1)//data.num_graphs
+        print_with_timestamp(f'edge_index shape: {data.edge_index.size()}')
+        print_with_timestamp(f'n: {data.num_nodes}, e: {data.edge_index.size(1)}')
+        for i in range(data.num_graphs):
+            data_edge_idx = data.edge_index[:, i*num_edges:i*num_edges+num_edges]%num_nodes
+            data_x = data.x[i*num_nodes:i*num_nodes+num_nodes,:]
+            print_with_timestamp(f'i: {i}, argument 1 shape: {data_x.size()}, argument 2 shape: {data_edge_idx.size()}')
+            x_temp, edge_adj_temp = self.pan(data_x, data_edge_idx)
+            print_with_timestamp(f'x_temp shape: {x_temp.size()}')
+            x.append(x_temp)
+            edge_adj.append(edge_adj_temp.to_dense())
+            print_with_timestamp(f'x shape: {x_temp.size()}, edge_adj shape: {edge_adj_temp.to_dense().size()}')
+        x = torch.stack(x).view(data.num_nodes, -1, data.x.size(1)).squeeze(1)
+        data.edge_adj = torch.stack(edge_adj)
+        print_with_timestamp(f'x shape: {x.size()}, edge_adj shape: {data.edge_adj.size()}, edge_attr shape: {data.edge_attr.size()}, edge_index shape: {data.edge_index.size()}, node_adj shape: {data.node_adj.size()}, transition shape: {data.transition.size()}')
+        x = self.bn_conv1(x)
+        x, edge_attr = self.conv1(x, data.edge_attr, data.edge_adj, data.node_adj, data.transition)
         x = self.bn_conv1(x.reshape(x.shape[0]*x.shape[1], x.shape[2]))
         x, edge_attr = F.leaky_relu(x), F.leaky_relu(edge_attr)
         x = F.dropout(x, p=self.dropout, training=self.training)
@@ -358,10 +377,7 @@ class Net(torch.nn.Module):
         x = F.dropout(x, p=self.dropout, training=self.training)
         edge_attr = F.dropout(edge_attr, p=self.dropout, training=self.training)
 
-
-        x, z = self.pan(x, data.edge_index)
-        z = z.to_dense()
-        x = x.to_dense()
+        x = self.gat(x, data.edge_index, edge_attr)
         #print_with_timestamp(f'x shape: {x.size()}')
 
         if self.pooling == 'mean':
