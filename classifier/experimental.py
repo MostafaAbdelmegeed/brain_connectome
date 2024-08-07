@@ -8,7 +8,7 @@ from torch.nn import Module, Parameter, Linear, Dropout, LayerNorm, ReLU
 from torch_geometric.nn import MessagePassing, global_mean_pool, global_max_pool, global_add_pool, GATv2Conv, BatchNorm
 import numpy as np
 import math
-from sklearn.model_selection import KFold, train_test_split
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.metrics import f1_score, accuracy_score, precision_score
 from torch_geometric.data import Batch
 import scipy.sparse as sp
@@ -331,35 +331,29 @@ class Net(torch.nn.Module):
     def __init__(self, functional_groups, num_nodes, hidden_dim, edge_dim, out_dim, atlas=116, dropout=0.5, pooling='mean'):
         super(Net, self).__init__()
         self.brain_encoding = BrainEncoding(functional_groups=functional_groups, num_nodes=num_nodes, hidden_dim=hidden_dim, atlas=atlas)
-        self.node_conv1 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=True)
-        self.edge_conv1 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=False)
-        self.node_conv2 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=True)
+        self.conv1 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=True)
+        self.conv2 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=False)
         self.lin = torch.nn.Linear(hidden_dim, out_dim)
         self.dropout = dropout
         self.pooling = pooling
         # Adding batch normalization layers
-        self.bn_node_conv1 = BatchNorm(hidden_dim)
-        self.bn_edge_conv1 = BatchNorm(hidden_dim)
-        self.bn_node_conv2 = BatchNorm(hidden_dim)
+        self.bn_conv1 = BatchNorm(hidden_dim)
+        self.bn_conv2 = BatchNorm(hidden_dim)
 
     def forward(self, data):
         #print_with_timestamp(f'data.x shape: {data.x.size()}, data.edge_attr shape: {data.edge_attr.size()}, data.edge_index shape: {data.edge_index.size()}, data.edge_adj shape: {data.edge_adj.size()}, data.node_adj shape: {data.node_adj.size()}, data.transition shape: {data.transition.size()}')
         data = self.brain_encoding(data)
-        x, edge_attr = self.node_conv1(data.x, data.edge_attr, data.edge_adj, data.node_adj, data.transition)
-        x = self.bn_node_conv1(x.reshape(x.shape[0]*x.shape[1], x.shape[2]))
+        x, edge_attr = self.conv1(data.x, data.edge_attr, data.edge_adj, data.node_adj, data.transition)
+        x = self.bn_conv1(x.reshape(x.shape[0]*x.shape[1], x.shape[2]))
         x, edge_attr = F.relu(x), F.relu(edge_attr)
         x = F.dropout(x, p=self.dropout, training=self.training)
         edge_attr = F.dropout(edge_attr, p=self.dropout, training=self.training)
 
-        x, edge_attr = self.edge_conv1(x, edge_attr, data.edge_adj, data.node_adj, data.transition)
-        x = self.bn_edge_conv1(x.reshape(x.shape[0]*x.shape[1], x.shape[2]))
+        x, edge_attr = self.conv2(x, edge_attr, data.edge_adj, data.node_adj, data.transition)
+        x = self.bn_conv2(x.reshape(x.shape[0]*x.shape[1], x.shape[2]))
         x, edge_attr = F.relu(x), F.relu(edge_attr)
         x = F.dropout(x, p=self.dropout, training=self.training)
         edge_attr = F.dropout(edge_attr, p=self.dropout, training=self.training)
-
-        x, edge_attr = self.node_conv2(x, edge_attr, data.edge_adj, data.node_adj, data.transition)
-        
-        x = self.bn_node_conv2(x.reshape(x.shape[0]*x.shape[1], x.shape[2]))
 
         #print_with_timestamp(f'x shape: {x.size()}')
 
@@ -409,7 +403,7 @@ n_nodes = 116
 edge_dim = dataset.edge_features_count()
 out_dim = 4 if dataset_name == 'ppmi' else 2
 # Cross-validation setup
-kf = KFold(n_splits=n_folds, shuffle=True, random_state=seed)
+kf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
 # Initialize lists to store metrics for all folds
 all_fold_metrics = {'accuracy': [], 'precision': [], 'f1': []}
 
@@ -418,7 +412,7 @@ writer = SummaryWriter(log_dir=f'runs/{dataset_name}_ee_s{seed}')
 writer.add_text('Arguments', str(args))
 
 # Training and evaluation loop
-for fold, (train_index, test_index) in enumerate(kf.split(dataset)):
+for fold, (train_index, test_index) in enumerate(kf.split(dataset, dataset.labels.to('cpu'))):
     print_with_timestamp(f"Fold {fold + 1}/{n_folds}")
     train_data = torch.utils.data.Subset(dataset, train_index)
     test_data = torch.utils.data.Subset(dataset, test_index)
@@ -435,8 +429,8 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset)):
     test_loader.collate_fn = collate_function
 
     model = Net(functional_groups, n_nodes, hidden_dim, edge_dim, out_dim, dropout=dropout).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-3)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+    optimizer = torch.optim.Adadelta(model.parameters(), weight_decay=1e-5)
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
     criterion = torch.nn.CrossEntropyLoss()
 
     best_val_loss = float('inf')
