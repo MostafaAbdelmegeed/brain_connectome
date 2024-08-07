@@ -415,7 +415,7 @@ kf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
 all_fold_metrics = {'accuracy': [], 'precision': [], 'f1': []}
 
 # TensorBoard writer
-writer = SummaryWriter(log_dir=f'runs/{dataset_name}_ee_s{seed}')
+writer = SummaryWriter(log_dir=f'runs/{dataset_name}_experimental_s{seed}')
 writer.add_text('Arguments', str(args))
 
 # Training and evaluation loop
