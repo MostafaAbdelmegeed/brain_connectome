@@ -4,8 +4,9 @@ from torch_geometric.loader import DataLoader
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.nn import Module, Parameter, Linear, Dropout, LayerNorm, ReLU, LeakyReLU
-from torch_geometric.nn import MessagePassing, global_mean_pool, global_max_pool, global_add_pool, GATv2Conv, BatchNorm, PANConv
+from torch.nn import Module, Parameter, Dropout, LayerNorm, ReLU, LeakyReLU
+from torch_geometric.nn import MessagePassing, global_mean_pool, global_max_pool, global_add_pool, GATv2Conv, BatchNorm, PANConv, GCNConv, Linear
+from torch_geometric.utils import dropout_node, dropout_edge, dropout_adj
 import numpy as np
 import math
 from sklearn.model_selection import StratifiedKFold, train_test_split
@@ -15,6 +16,7 @@ import scipy.sparse as sp
 import datetime
 import argparse
 from torch.utils.tensorboard import SummaryWriter
+import datetime
 
 
 def print_with_timestamp(message):
@@ -30,9 +32,11 @@ def parse_args():
     parser.add_argument('--n_folds', type=int, default=5, help='Number of folds for cross-validation')
     parser.add_argument('--epochs', type=int, default=30, help='Number of epochs')
     parser.add_argument('--batch_size', type=int, default=1, help='Batch size')
-    parser.add_argument('--learning_rate', type=float, default=0.00001, help='Learning rate')
+    parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate')
     parser.add_argument('--hidden_dim', type=int, default=64, help='Hidden dimension size')
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
+    parser.add_argument('--filter_size', type=int, default=6, help='Filter size for PANConv')
+    parser.add_argument('--heads', type=int, default=1, help='Number of attention heads')
     parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping')
     parser.add_argument('--test_size', type=float, default=0.2, help='Test size for splitting data')
     parser.add_argument('--pooling', type=str, default='mean', help='Pooling method')
@@ -56,7 +60,7 @@ np.random.seed(seed)
 torch.manual_seed(seed)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(seed)
-
+torch.autograd.set_detect_anomaly(True)
 
 def yeo_network():
     # Define the refined functional classes based on Yeo's 7 Network Parcellations
@@ -190,23 +194,11 @@ data = torch.load(f'data/{dataset_name}_coembed_p{int(args.percentile*100)}.pth'
 functional_groups = yeo_network()
 
 class BrainEncoding(MessagePassing):
-    def __init__(self, functional_groups, num_nodes, hidden_dim, atlas=116, dropout_rate=0.6, heads=1, edge_dim=5):
+    def __init__(self, functional_groups, hidden_dim, n_roi=116):
         super(BrainEncoding, self).__init__()
         self.functional_groups = functional_groups
-        self.num_nodes = num_nodes
         self.hidden_dim = hidden_dim
-        self.atlas = atlas
-        self.heads = heads
-        
-        # Linear layer to transform the one-hot encoding
-        self.linear = Linear(self.num_nodes + self.hidden_dim + self.atlas // 2, self.hidden_dim)
-        self.relu = LeakyReLU()
-        self.dropout_rate = dropout_rate
-        self.dropout = Dropout(dropout_rate)
-        
-        # Graph attention layer
-        self.gat = GATv2Conv(self.hidden_dim, self.hidden_dim // self.heads, heads=self.heads, dropout=self.dropout_rate, edge_dim=edge_dim)
-        
+        self.num_nodes = n_roi
         self.encoding = self.create_encoding()
 
     @property
@@ -214,13 +206,18 @@ class BrainEncoding(MessagePassing):
         return next(self.parameters()).device
 
     def create_encoding(self):
-        encoding = torch.zeros((self.num_nodes, self.hidden_dim + self.atlas // 2))
+        encoding = torch.zeros((self.num_nodes, self.hidden_dim))
         for group, nodes in self.functional_groups.items():
             for node in nodes:
-                region_encoding = [0] * (self.atlas // 2)
-                region_encoding[node // 2] = 1 if node % 2 == 0 else -1
-                encoding[node] = torch.tensor(region_encoding + self.get_group_encoding(group).tolist())
+                group_encoding = torch.tensor(self.get_group_encoding(group).tolist())
+                if node % 2 == 0:
+                    # Left hemisphere
+                    encoding[node] += group_encoding
+                else:
+                    # Right hemisphere
+                    encoding[node] += group_encoding + 1  # Shift the encoding for the right hemisphere
         return encoding
+
 
     def get_group_encoding(self, group):
         # Example encoding based on group name. You can customize this.
@@ -228,23 +225,18 @@ class BrainEncoding(MessagePassing):
         encoding[hash(group) % self.hidden_dim] = 1
         return encoding
 
-    def forward(self, data):
-        if data.x is not None:
-            batch_size = data.x.size(0) // self.num_nodes
-            expanded_encoding = self.encoding.repeat(batch_size, 1)
-            encodings = torch.cat([data.x, expanded_encoding], dim=-1)
-        else:
-            encodings = self.encoding
-
-        # Apply linear transformation and ReLU activation
-        encodings = self.relu(self.linear(encodings))
-        encodings = self.dropout(encodings)
-        
-        # Apply graph attention layer
-        encodings = self.gat(encodings, data.edge_index, data.edge_attr)
-        
-        data.x = encodings
-        return data
+    def forward(self, x):
+        batch_size = x.size(0) // x.size(1)
+        x = self.encoding.repeat(batch_size, 1)
+        # if data.x is not None:
+        #     batch_size = data.x.size(0) // self.num_nodes
+        #     expanded_encoding = self.encoding.repeat(batch_size, 1)
+        #     encodings = torch.cat([data.x, expanded_encoding], dim=-1)
+        # else:
+        #     encodings = self.encoding
+        # data.x = self.linear(encodings)
+        # data.x = encodings
+        return x
 
 class AlternateConvolution(Module):
     def __init__(self, in_features_v, out_features_v, in_features_e, out_features_e, bias=True, node_layer=True):
@@ -328,56 +320,84 @@ class AlternateConvolution(Module):
 
 
 class Net(torch.nn.Module):
-    def __init__(self, functional_groups, num_nodes, hidden_dim, edge_dim, out_dim, heads=1, atlas=116, dropout=0.5, pooling='mean', filter_size=6):
+    def __init__(self, functional_groups, num_nodes, hidden_dim, edge_dim, out_dim, heads=1, atlas=116, dropout=0.7, pooling='mean', filter_size=6):
         super(Net, self).__init__()
-        self.brain_encoding = BrainEncoding(functional_groups=functional_groups, num_nodes=num_nodes, hidden_dim=hidden_dim, atlas=atlas)
+        self.brain_encoding = BrainEncoding(functional_groups=functional_groups, hidden_dim=hidden_dim)
         self.pan = PANConv(hidden_dim, hidden_dim, filter_size)
-        self.conv1 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=True)
-        self.conv2 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=False)
-        self.gat = GATv2Conv(hidden_dim, hidden_dim//2, heads=heads, dropout=dropout, edge_dim=edge_dim)
-        
-        self.lin = torch.nn.Linear(hidden_dim//2, out_dim)
-        self.dropout = dropout
+        self.conv1 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=False)
+        self.conv2 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=True)
+        self.conv3 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=False)
+        self.gat = GATv2Conv(hidden_dim, hidden_dim, heads=heads, dropout=dropout, edge_dim=edge_dim)
+        self.lin = torch.nn.Linear(hidden_dim*heads, out_dim)
         self.pooling = pooling
         # Adding batch normalization layers
-        self.bn_conv1 = BatchNorm(hidden_dim)
-        self.bn_conv2 = BatchNorm(hidden_dim)
+        self.node_bn1 = BatchNorm(hidden_dim)
+        self.node_bn2 = BatchNorm(hidden_dim)
+        self.node_bn3 = BatchNorm(hidden_dim)
+        self.node_bn4 = BatchNorm(hidden_dim)
+        self.node_bn5 = BatchNorm(hidden_dim)
+        self.node_bn6 = BatchNorm(hidden_dim*heads)
+        self.edge_bn1 = BatchNorm(edge_dim)
+        self.edge_bn2 = BatchNorm(edge_dim)
+        self.edge_bn3 = BatchNorm(edge_dim)
+        self.activation = LeakyReLU()
+        self.dropout = dropout
 
     def forward(self, data):
         #print_with_timestamp(f'data.x shape: {data.x.size()}, data.edge_attr shape: {data.edge_attr.size()}, data.edge_index shape: {data.edge_index.size()}, data.edge_adj shape: {data.edge_adj.size()}, data.node_adj shape: {data.node_adj.size()}, data.transition shape: {data.transition.size()}')
-        data = self.brain_encoding(data)
-        x = []
-        node_adj = []
+        x = self.brain_encoding(data.x)
+        x = self.node_bn1(x)
+        h = []
+        n_adj = []
         num_nodes = data.num_nodes//data.num_graphs
-        num_edges = data.edge_index.size(1)//data.num_graphs
-        
-        
+        num_edges = data.num_edges//data.num_graphs
         for i in range(data.num_graphs):
             data_edge_idx = data.edge_index[:, i*num_edges:i*num_edges+num_edges]%num_nodes
-            data_x = data.x[i*num_nodes:i*num_nodes+num_nodes,:]
-            
-            x_temp, node_adj_temp = self.pan(data_x, data_edge_idx)
-            
-            x.append(x_temp)
-            node_adj.append(node_adj_temp.to_dense())
-            
-        x = torch.stack(x).view(data.num_nodes, -1, data.x.size(1)).squeeze(1)
-        data.node_adj = torch.stack(node_adj).view(data.num_nodes, -1, data.node_adj.size(1)).squeeze(1)
-        
-        x = self.bn_conv1(x)
-        x, edge_attr = self.conv1(x, data.edge_attr, data.edge_adj, data.node_adj, data.transition)
-        x = self.bn_conv1(x.reshape(x.shape[0]*x.shape[1], x.shape[2]))
-        x, edge_attr = F.leaky_relu(x), F.leaky_relu(edge_attr)
+            x_temp, node_adj_temp = self.pan(x[i*num_nodes:i*num_nodes+num_nodes,:], data_edge_idx)
+            h.append(x_temp)
+            n_adj.append(node_adj_temp.to_dense())
+        x = torch.stack(h).view(data.num_nodes, -1, x.size(1)).squeeze(1)
+        n_adj = torch.stack(n_adj).view(data.num_nodes, -1, data.node_adj.size(1)).squeeze(1).to_dense()
+        x = self.node_bn2(x)
+        x = self.activation(x)
+        residual_x = x
+        residual_edge_attr = data.edge_attr
+
+        x, edge_attr = self.conv1(x, data.edge_attr, data.edge_adj, n_adj, data.transition)
+        x = x.reshape(data.num_nodes, -1, x.size(2)).squeeze(1)
+        edge_attr = edge_attr.reshape(data.num_edges, -1, edge_attr.size(2)).squeeze(1)
+        x= self.node_bn3(x)
+        edge_attr = self.edge_bn1(edge_attr)
+        x, edge_attr = self.activation(x), self.activation(edge_attr)
+
+
+        x, edge_attr = self.conv2(x, edge_attr, data.edge_adj, n_adj, data.transition)
+        x = x.reshape(data.num_nodes, -1, x.size(2)).squeeze(1)
+        edge_attr = edge_attr.reshape(data.num_edges, -1, edge_attr.size(2)).squeeze(1)
+        x= self.node_bn4(x)
+        edge_attr = self.edge_bn2(edge_attr)
+        x, edge_attr = self.activation(x), self.activation(edge_attr)
+
+
+        x, edge_attr = self.conv3(x, edge_attr, data.edge_adj, n_adj, data.transition)
+        x = x.reshape(data.num_nodes, -1, x.size(2)).squeeze(1)
+        edge_attr = edge_attr.reshape(data.num_edges, -1, edge_attr.size(2)).squeeze(1)
+        x = x + residual_x
+        edge_attr = edge_attr + residual_edge_attr
+        x= self.node_bn5(x)
+        edge_attr = self.edge_bn3(edge_attr)
+        x, edge_attr = self.activation(x), self.activation(edge_attr)
+
+
         x = F.dropout(x, p=self.dropout, training=self.training)
         edge_attr = F.dropout(edge_attr, p=self.dropout, training=self.training)
 
-        x, edge_attr = self.conv2(x, edge_attr, data.edge_adj, data.node_adj, data.transition)
-        x = self.bn_conv2(x.reshape(x.shape[0]*x.shape[1], x.shape[2]))
-        x, edge_attr = F.leaky_relu(x), F.leaky_relu(edge_attr)
+
+        x = self.gat(x, data.edge_index, edge_attr)
+        x = self.node_bn6(x)
+        x = self.activation(x)
         x = F.dropout(x, p=self.dropout, training=self.training)
-        edge_attr = F.dropout(edge_attr, p=self.dropout, training=self.training)
-        
-        x = self.gat(x, data.edge_index, edge_attr.reshape(edge_attr.shape[0]*edge_attr.shape[1], edge_attr.shape[2]))
+
         #print_with_timestamp(f'x shape: {x.size()}')
 
         if self.pooling == 'mean':
@@ -387,6 +407,7 @@ class Net(torch.nn.Module):
         elif self.pooling == 'add':
             x = global_add_pool(x, data.batch)
         x = self.lin(x)
+
 
         return x
 
@@ -419,6 +440,8 @@ hidden_dim = args.hidden_dim
 dropout = args.dropout
 patience = args.patience
 pooling = args.pooling
+heads = args.heads
+filter_size = args.filter_size
 
 test_size = args.test_size
 
@@ -430,8 +453,11 @@ kf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
 # Initialize lists to store metrics for all folds
 all_fold_metrics = {'accuracy': [], 'precision': [], 'f1': []}
 
+
+# Get the current timestamp
+timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 # TensorBoard writer
-writer = SummaryWriter(log_dir=f'runs/{dataset_name}_experimental2_s{seed}')
+writer = SummaryWriter(log_dir=f'runs/{dataset_name}_experimental_s{seed}_{timestamp}')
 writer.add_text('Arguments', str(args))
 
 # Training and evaluation loop
@@ -451,8 +477,8 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset, dataset.label
     test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, generator=generator)
     test_loader.collate_fn = collate_function
 
-    model = Net(functional_groups, n_nodes, hidden_dim, edge_dim, out_dim, dropout=dropout).to(device)
-    optimizer = torch.optim.Adadelta(model.parameters(), weight_decay=1e-5)
+    model = Net(functional_groups, n_nodes, hidden_dim, edge_dim, out_dim, dropout=dropout, heads=heads, filter_size=filter_size).to(device)
+    optimizer = torch.optim.Adadelta(model.parameters(), weight_decay=1e-4, lr=learning_rate)
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
     criterion = torch.nn.CrossEntropyLoss()
 
@@ -468,13 +494,24 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset, dataset.label
             optimizer.zero_grad()
             output = model(data)
             loss = criterion(output, data.y)
-            loss.backward(retain_graph=True)
+            # print_with_timestamp(f'output: {output}, data.y: {data.y}')
+            loss.backward()
+            # Print gradients for specific layers
+            # Log gradients to TensorBoard
+            
             # Gradient clipping
+            # torch.nn.utils.clip_grad_value_(model.parameters(), clip_value=1e-4)
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             train_loss += loss.item()
-        
+        # for name, param in model.named_parameters():
+        #     if param.grad is not None:
+        #         print_with_timestamp(f'{name} - Grad Mean: {param.grad.mean()}, Grad Std: {param.grad.std()}')
         train_loss /= len(train_loader)
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                writer.add_scalar(f'gradients/{name}_mean', param.grad.mean(), epoch)
+                writer.add_scalar(f'gradients/{name}_std', param.grad.std(), epoch)
         writer.add_scalar(f'Fold_{fold+1}/Train_Loss', train_loss, epoch)
 
         # Validate the model

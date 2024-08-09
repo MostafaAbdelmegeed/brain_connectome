@@ -79,8 +79,8 @@ def process_matrices(dataloader, device, percentile=0.9):
     edge_adj_list = []
     trans_list = []
 
-    for i, (connectivity, _) in enumerate(tqdm(dataloader, desc="Processing matrices")):
-        connectivity = connectivity.squeeze(0).to(device)
+    for connectivity in tqdm(dataloader, desc="Processing matrices"):
+        connectivity = connectivity[0].squeeze(0).to(device)
         new_conn, n_adj, e_adj, t = coembed_pipeline(connectivity, device=device, percentile=percentile)
         new_connectivity_list.append(new_conn.cpu())
         node_adj_list.append(n_adj.cpu())
@@ -104,14 +104,13 @@ def main():
         raise ValueError("Connectivity matrix must be 2D or 3D")
 
     # Prepare DataLoader
-    tensor_dataset = TensorDataset(connectivity, label)
+    tensor_dataset = TensorDataset(connectivity)
     dataloader = DataLoader(tensor_dataset, batch_size=1, shuffle=False, num_workers=4)
 
     device = torch.device(f'cuda:{args.gpu_id}' if torch.cuda.is_available() else 'cpu')
 
     new_connectivity, node_adj, edge_adj, trans = process_matrices(dataloader, device, args.percentile)
 
-    label = label.float()
     torch.save({'connectivity': new_connectivity, 'node_adj': node_adj, 
                 'edge_adj': edge_adj, 'transition': trans, 'label': label}, 
                 f'data/{dataset_name}_coembed_p{int(args.percentile*100)}.pth')
