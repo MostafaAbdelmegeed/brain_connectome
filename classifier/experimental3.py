@@ -18,6 +18,8 @@ import argparse
 from torch.utils.tensorboard import SummaryWriter
 import datetime
 
+# python classifier/experimental3.py --gpu_id 0 --dataset_name adni --seed 10 --n_folds 5 --epochs 100 --batch_size 5 --learning_rate 0.001 --hidden_dim 32 --dropout 0.7 --filter_size 6 --heads 1 --patience 10 --test_size 0.3 --pooling mean --percentile 0.9
+
 
 def print_with_timestamp(message):
     timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
