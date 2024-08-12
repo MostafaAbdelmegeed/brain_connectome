@@ -53,17 +53,17 @@ def main():
         'dataset_name': [dataset],
         'seed': [seed],
         'n_folds': [10],
-        'epochs': [300, 500],
-        'batch_size': [1, 16],
-        'learning_rate': [0.001, 0.0001],
-        'hidden_dim': [16, 64, 256, 1024, 4096],
-        'dropout': [0.5, 0.7],
-        'filter_size': [6, 12, 18, 24],
-        'heads': [1, 2, 3],
-        'patience': [30, 50],
+        'epochs': [500],
+        'batch_size': [4],
+        'learning_rate': [0.001],
+        'hidden_dim': [4096],
+        'dropout': [0.7],
+        'filter_size': [24],
+        'heads': [2],
+        'patience': [30],
         'test_size': [0.1],
-        'pooling': ['mean', 'max'],
-        'percentile': [0.9, 0.95]
+        'pooling': ['mean'],
+        'percentile': [0.9]
     }
 
     # Generate all combinations of hyperparameters
