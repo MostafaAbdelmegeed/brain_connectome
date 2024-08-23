@@ -1,8 +1,3 @@
-import os
-
-# Set the environment variable
-os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-
 import torch
 from torch_geometric.data import Data, Dataset
 from torch_geometric.loader import DataLoader
@@ -24,7 +19,7 @@ import argparse
 from torch.utils.tensorboard import SummaryWriter
 import datetime
 
-# python classifier/experimental4.py --gpu_id 0 --dataset_name ppmi --seed 10 --n_folds 10 --epochs 300 --batch_size 32 --learning_rate 0.00001 --hidden_dim 1024 --dropout 0.5 --heads 2 --patience 30 --test_size 0.2 --pooling mean --percentile 0.9 --n_layers 10
+# python classifier/experimental5.py --gpu_id 0 --dataset_name ppmi --seed 10 --n_folds 10 --epochs 300 --batch_size 32 --learning_rate 0.00001 --hidden_dim 1024 --dropout 0.5 --heads 2 --patience 30 --test_size 0.2 --pooling mean --percentile 0.9 --n_layers 10
 
 
 def print_with_timestamp(message):
@@ -378,17 +373,13 @@ class BrainBlock(Module):
     def __init__(self, in_features, out_features, edge_dim, heads=1, dropout=0.7):
         super(BrainBlock, self).__init__()
         self.gat = GATv2Conv(in_features, out_features, heads=heads, dropout=dropout, edge_dim=edge_dim)
-        self.res = ResGatedGraphConv(out_features*heads, out_features, edge_dim=edge_dim)
         self.bn = BatchNorm(out_features)
-        self.dropout = Dropout(p=dropout)
         self.relu = LeakyReLU()
 
     def forward(self, x, edge_index, edge_attr):
         x = self.gat(x, edge_index, edge_attr)
-        x = self.res(x, edge_index, edge_attr)
         x = self.relu(x)
         x = self.bn(x)
-        x = self.dropout(x)
         return x
 
 class Net(torch.nn.Module):
@@ -398,7 +389,6 @@ class Net(torch.nn.Module):
         self.layers = torch.nn.ModuleList()
         for i in range(n_layers):
             self.layers.append(BrainBlock(hidden_dim, hidden_dim, edge_dim, heads=heads, dropout=dropout))
-        self.gin = GINConv(Sequential('x', [(Linear(hidden_dim, hidden_dim), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_dim, hidden_dim), 'x -> x')]), train_eps=True)
         self.fc = Linear(hidden_dim, out_dim)
         self.pooling = pooling
 
@@ -409,7 +399,6 @@ class Net(torch.nn.Module):
             x = layer(x, data.edge_index, edge_attr)
             # print_with_timestamp(f'Layer {i+1}.{i%5}: x mean: {x.mean()}, x std: {x.std()}')
         
-        x = self.gin(x, data.edge_index)
 
         if self.pooling == 'mean':
             x = global_mean_pool(x, data.batch)
@@ -502,7 +491,7 @@ all_fold_metrics = {'accuracy': [], 'precision': [], 'recall': [], 'f1': [], 'co
 
 
 # Get the current timestamp
-timestamp = datetime.datetime.now().strftime("%m-%d-%H-%M-%S")
+timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 # TensorBoard writer
 writer = SummaryWriter(log_dir=f'runs/experimental_4_{dataset_name}_s{seed}_{timestamp}')
 writer.add_text('Arguments', str(args))
@@ -538,7 +527,7 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset, dataset.label
     model = Net(functional_groups, hidden_dim, edge_dim, out_dim, dropout=dropout, heads=heads, n_layers=n_layers).to(device)
     optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-5, lr=learning_rate)
     # Define the learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=patience//3)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=patience//2)
      # Initialize gradients dictionary for this fold
     fold_gradients = {}
 
@@ -581,12 +570,12 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset, dataset.label
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(data.y.cpu().numpy())
 
-            # # Store gradients for each parameter
-            # for name, param in model.named_parameters():
-            #     if param.grad is not None:
-            #         if name not in fold_gradients:
-            #             fold_gradients[name] = []
-            #         fold_gradients[name].append(param.grad.clone().detach().cpu())
+            # Store gradients for each parameter
+            for name, param in model.named_parameters():
+                if param.grad is not None:
+                    if name not in fold_gradients:
+                        fold_gradients[name] = []
+                    fold_gradients[name].append(param.grad.clone().detach().cpu())
 
         train_accuracy = correct_predictions / total_predictions
         train_loss /= len(train_loader)
@@ -600,14 +589,14 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset, dataset.label
 
         # print_with_timestamp(f"Epoch {epoch + 1}/{epochs}, Train Loss: {train_loss}, Train Accuracy: {train_accuracy}")
          # After the epoch, save the mean and std of the gradients
-        # for name, grads in fold_gradients.items():
-        #     grads_tensor = torch.stack(grads)
-        #     mean_grad = grads_tensor.mean(dim=0)
-        #     std_grad = grads_tensor.std(dim=0)
+        for name, grads in fold_gradients.items():
+            grads_tensor = torch.stack(grads)
+            mean_grad = grads_tensor.mean(dim=0)
+            std_grad = grads_tensor.std(dim=0)
 
-        #     writer.add_scalar(f'Fold_{fold+1}/Gradients/{name}_mean', mean_grad.mean().item(), epoch)
-        #     if std_grad.numel() > 1:
-        #         writer.add_scalar(f'Fold_{fold+1}/Gradients/{name}_std', std_grad.mean().item(), epoch)
+            writer.add_scalar(f'Fold_{fold+1}/Gradients/{name}_mean', mean_grad.mean().item(), epoch)
+            if std_grad.numel() > 1:
+                writer.add_scalar(f'Fold_{fold+1}/Gradients/{name}_std', std_grad.mean().item(), epoch)
 
         # Clear gradients storage after saving to TensorBoard to save memory
         fold_gradients = {}
@@ -640,13 +629,13 @@ for fold, (train_index, test_index) in enumerate(kf.split(dataset, dataset.label
 
         writer.add_scalar(f'Fold_{fold+1}/Metrics/Val_Loss', val_loss, epoch)
 
-        # for name, param in model.named_parameters():
-        #         if param.grad is not None:
-        #             writer.add_scalar(f'Fold_{fold+1}/Gradients/{name}_mean', param.grad.mean(), epoch)
+        for name, param in model.named_parameters():
+                if param.grad is not None:
+                    writer.add_scalar(f'Fold_{fold+1}/Gradients/{name}_mean', param.grad.mean(), epoch)
                     
-        #             # Only log std if the number of elements is greater than 1
-        #             if param.grad.numel() > 1:
-        #                 writer.add_scalar(f'Fold_{fold+1}/Gradients/{name}_std', param.grad.std(), epoch)
+                    # Only log std if the number of elements is greater than 1
+                    if param.grad.numel() > 1:
+                        writer.add_scalar(f'Fold_{fold+1}/Gradients/{name}_std', param.grad.std(), epoch)
         
         print_with_timestamp(f"{epoch + 1}/{epochs}\t\t||\t{train_loss:.4f}\t\t|\t{val_loss:.4f}\t")
 
@@ -723,57 +712,6 @@ print_with_timestamp(f"Final Metrics | Accuracy: {final_accuracy:.4f} | Precisio
 # Print the average confusion matrix
 avg_conf_matrix = np.mean(all_fold_metrics['conf_matrix'], axis=0)
 print_with_timestamp(f"Final Confusion Matrix:\n{avg_conf_matrix}")
-
-import matplotlib.pyplot as plt
-from io import BytesIO
-import PIL.Image
-
-def plot_confusion_matrix(cm, class_names):
-    figure = plt.figure(figsize=(8, 8))
-    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
-    plt.title("Confusion Matrix")
-    plt.colorbar()
-    tick_marks = np.arange(len(class_names))
-    plt.xticks(tick_marks, class_names, rotation=45)
-    plt.yticks(tick_marks, class_names)
-
-    # Normalize the confusion matrix
-    cm = np.around(cm.astype('float') / cm.sum(axis=1)[:, np.newaxis], decimals=2)
-
-    # Use white text if squares are dark; otherwise, use black
-    threshold = cm.max() / 2.
-    for i, j in np.ndindex(cm.shape):
-        color = "white" if cm[i, j] > threshold else "black"
-        plt.text(j, i, cm[i, j], horizontalalignment="center", color=color)
-
-    plt.tight_layout()
-    plt.ylabel('True label')
-    plt.xlabel('Predicted label')
-    return figure
-
-def plot_to_image(figure):
-    # Save the plot to a PNG in memory
-    buf = BytesIO()
-    plt.savefig(buf, format='png')
-    plt.close(figure)
-    buf.seek(0)
-    image = PIL.Image.open(buf)
-    image = np.array(image)
-    return image
-
-# Define class names based on your specific classes
-if dataset_name == 'ppmi':
-    class_names = ['Control', 'Prodromal', 'Patient', 'Swedd']
-else:
-    class_names = ['Control', 'Patient']
-
-# Create a confusion matrix plot
-cm_figure = plot_confusion_matrix(avg_conf_matrix, class_names)
-
-# Convert the plot to a TensorBoard image
-cm_image = plot_to_image(cm_figure)
-
-writer.add_image("Confusion Matrix", cm_image, global_step=0)
 
 # Close the TensorBoard writer
 writer.close()

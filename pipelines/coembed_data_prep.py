@@ -29,36 +29,48 @@ def node_adjacency_matrix(connectivity):
 
 
 def edge_adjacency_matrix(node_adj, device):
-    """Create an edge adjacency matrix from a node adjacency matrix."""
+    """Create an edge adjacency matrix from a node adjacency matrix, including self-loops."""
     node_adj = node_adj.cpu().numpy()
-    np.fill_diagonal(node_adj, 0)
-    edge_index = np.triu(node_adj).nonzero()
-    num_edge = len(edge_index[0])
+
+    # Find all edges, including self-loops
+    edge_index = np.array(np.nonzero(node_adj))
+    num_edge = edge_index.shape[1]
+
+    # Initialize the edge adjacency matrix
     edge_adj = np.zeros((num_edge, num_edge))
 
-    # Create edge adjacency matrix
+    # Create edge adjacency matrix using broadcasting and vectorized operations
     for i in range(num_edge):
-        for j in range(i + 1, num_edge):
-            # Check if the edges share a common node
-            if (edge_index[0][i] == edge_index[0][j]) or (edge_index[1][i] == edge_index[1][j]) or (edge_index[0][i] == edge_index[1][j]) or (edge_index[1][i] == edge_index[0][j]):
-                edge_adj[i, j] = 1
-                edge_adj[j, i] = 1  # Because the adjacency matrix is symmetric
+        # Check if the edges share a common node or are the same edge (self-loop)
+        common_nodes = (edge_index[:, i][:, None] == edge_index).any(axis=0)
+        edge_adj[i, common_nodes] = 1
 
-    # The diagonal should always be 1, indicating self-loops
+    # The diagonal is set to 1, explicitly indicating self-loops
     np.fill_diagonal(edge_adj, 1)
 
     return sparse_mx_to_torch_sparse_tensor(sp.csr_matrix(edge_adj), device=device)
 
+
 def transition_matrix(node_adj, device):
-    """Create a transition matrix from a node adjacency matrix."""
+    """Create a transition matrix from a node adjacency matrix, including self-loops."""
     node_adj = node_adj.cpu().numpy()
-    np.fill_diagonal(node_adj, 0)
-    edge_index = np.triu(node_adj).nonzero()
-    num_edge = len(edge_index[0])
+
+    # Find all edges, including self-loops
+    edge_index = np.array(np.nonzero(node_adj))
+    num_edge = edge_index.shape[1]
+    
+    # Each edge connects two nodes, hence repeat each edge index twice
     col_index = np.repeat(np.arange(num_edge), 2)
+    
+    # The row index corresponds to the node indices connected by each edge
     row_index = np.hstack([edge_index[0], edge_index[1]])
+    
+    # Data array indicates the presence of a connection
     data = np.ones(num_edge * 2)
+
+    # The transition matrix has shape (number of nodes, number of edges)
     T = sp.csr_matrix((data, (row_index, col_index)), shape=(node_adj.shape[0], num_edge))
+    
     return sparse_mx_to_torch_sparse_tensor(T, device=device)
 
 def suppress_below_percentile(x, percentile):
