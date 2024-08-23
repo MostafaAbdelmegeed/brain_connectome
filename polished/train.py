@@ -50,7 +50,16 @@ def plot_to_image(figure):
     plt.close(figure)
     buf.seek(0)
     image = PIL.Image.open(buf)
+    
+    # Convert to a format that TensorBoard can handle
     image = np.array(image)
+    
+    # Ensure the image is in RGB format (height, width, 3)
+    if len(image.shape) == 2:  # Grayscale to RGB
+        image = np.stack([image] * 3, axis=-1)
+    elif image.shape[-1] == 4:  # RGBA to RGB
+        image = image[..., :3]
+    
     return image
 
 def train(model_name, dataset, device, args):
@@ -78,7 +87,7 @@ def train(model_name, dataset, device, args):
     # Get the current timestamp
     timestamp = datetime.datetime.now().strftime("%m-%d-%H-%M-%S")
     # TensorBoard writer
-    writer = SummaryWriter(log_dir=f'runs/{model_name}_{args.dataset}_s{seed}_f{n_folds}_e{epochs}_bs{batch_size}_lr{learning_rate}_hd{hidden_dim}_d{dropout}_h{heads}_l{n_layers}_ts{test_size}_a{args.augmented}_{timestamp}')
+    writer = SummaryWriter(log_dir=f'polished/runs/{model_name}_{args.dataset}_s{seed}_f{n_folds}_e{epochs}_bs{batch_size}_lr{learning_rate}_hd{hidden_dim}_d{dropout}_h{heads}_l{n_layers}_ts{test_size}_a{args.augmented}_{timestamp}')
     writer.add_text('Arguments', str(args))
 
     generator = torch.Generator(device=device).manual_seed(seed)
@@ -200,34 +209,34 @@ def train(model_name, dataset, device, args):
                 test_labels.extend(data.y.cpu().numpy())
 
 
-    # Compute metrics
-    acc = accuracy_score(test_labels, test_preds)
-    precision = precision_score(test_labels, test_preds, average='weighted', zero_division=0)
-    recall = recall_score(test_labels, test_preds, average='weighted', zero_division=0)
-    f1 = f1_score(test_labels, test_preds, average='weighted')
+        # Compute metrics
+        acc = accuracy_score(test_labels, test_preds)
+        precision = precision_score(test_labels, test_preds, average='weighted', zero_division=0)
+        recall = recall_score(test_labels, test_preds, average='weighted', zero_division=0)
+        f1 = f1_score(test_labels, test_preds, average='weighted')
 
-    # Confusion matrix for the test set
-    conf_matrix = confusion_matrix(test_labels, test_preds)
+        # Confusion matrix for the test set
+        conf_matrix = confusion_matrix(test_labels, test_preds)
 
-    writer.add_scalar(f'Fold_{fold+1}/Test_Accuracy', acc, epoch)
-    writer.add_scalar(f'Fold_{fold+1}/Test_Precision', precision, epoch)
-    writer.add_scalar(f'Fold_{fold+1}/Test_Recall', recall, epoch)
-    writer.add_scalar(f'Fold_{fold+1}/Test_F1', f1, epoch)
-    print_with_timestamp(f"Fold {fold + 1} Metrics: Accuracy: {acc:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}")
+        writer.add_scalar(f'Fold_{fold+1}/Test_Accuracy', acc, epoch)
+        writer.add_scalar(f'Fold_{fold+1}/Test_Precision', precision, epoch)
+        writer.add_scalar(f'Fold_{fold+1}/Test_Recall', recall, epoch)
+        writer.add_scalar(f'Fold_{fold+1}/Test_F1', f1, epoch)
+        print_with_timestamp(f"Fold {fold + 1} Metrics: Accuracy: {acc:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}")
 
-    # Store metrics for the current fold
-    all_fold_metrics['accuracy'].append(acc)
-    all_fold_metrics['precision'].append(precision)
-    all_fold_metrics['recall'].append(recall)
-    all_fold_metrics['f1'].append(f1)
-    all_fold_metrics['conf_matrix'].append(conf_matrix)
+        # Store metrics for the current fold
+        all_fold_metrics['accuracy'].append(acc)
+        all_fold_metrics['precision'].append(precision)
+        all_fold_metrics['recall'].append(recall)
+        all_fold_metrics['f1'].append(f1)
+        all_fold_metrics['conf_matrix'].append(conf_matrix)
 
-    # Print average metrics until the latest fold
-    avg_accuracy = np.mean(all_fold_metrics['accuracy'])
-    avg_precision = np.mean(all_fold_metrics['precision'])
-    avg_recall = np.mean(all_fold_metrics['recall'])
-    avg_f1 = np.mean(all_fold_metrics['f1'])
-    print_with_timestamp(f"Average Metrics until Fold {fold + 1}: Accuracy: {avg_accuracy:.4f}, Precision: {avg_precision:.4f}, Recall: {avg_recall:.4f}, F1 Score: {avg_f1:.4f}")
+        # Print average metrics until the latest fold
+        avg_accuracy = np.mean(all_fold_metrics['accuracy'])
+        avg_precision = np.mean(all_fold_metrics['precision'])
+        avg_recall = np.mean(all_fold_metrics['recall'])
+        avg_f1 = np.mean(all_fold_metrics['f1'])
+        print_with_timestamp(f"Average Metrics until Fold {fold + 1}: Accuracy: {avg_accuracy:.4f}, Precision: {avg_precision:.4f}, Recall: {avg_recall:.4f}, F1 Score: {avg_f1:.4f}")
 
     # Compute and print final metrics after cross-validation
     final_accuracy = np.mean(all_fold_metrics['accuracy'])
@@ -250,6 +259,9 @@ def train(model_name, dataset, device, args):
     cm_figure = plot_confusion_matrix(avg_conf_matrix, class_names)
     # Convert the plot to a TensorBoard image
     cm_image = plot_to_image(cm_figure)
-    writer.add_image("Confusion Matrix", cm_image, global_step=0)
+    # Ensure the image is in the correct format
+    if cm_image.dtype != np.uint8:
+        cm_image = (cm_image * 255).astype(np.uint8)
+    writer.add_image("Confusion Matrix", cm_image, global_step=0, dataformats='HWC')
     # Close the TensorBoard writer
     writer.close()

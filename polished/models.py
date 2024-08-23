@@ -152,7 +152,7 @@ class BrainBlock(Module):
         return x
 
 class BrainNet(torch.nn.Module):
-    def __init__(self, hidden_channels, num_layers, out_channels, functional_groups=None, edge_dim=1, heads=1, dropout=0.7):
+    def __init__(self, hidden_channels, num_layers, out_channels, functional_groups=None, edge_dim=5, heads=1, dropout=0.7):
         super(BrainNet, self).__init__()
         self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
         self.layers = torch.nn.ModuleList()
@@ -172,7 +172,7 @@ class BrainNet(torch.nn.Module):
     
 
 
-def get_model(args, edge_dim=5):
+def get_model(args):
     model_name = args.model
     hidden_dim = args.hidden_dim
     n_layers = args.n_layers
@@ -181,11 +181,11 @@ def get_model(args, edge_dim=5):
     heads = args.heads
     act = LeakyReLU()
     groups = yeo_network()
-    if model_name == 'BrainNet':
-        return BrainNet(functional_groups=groups, hidden_dim=hidden_dim, edge_dim=edge_dim, out_dim=out_channels, heads=heads, dropout=dropout, n_layers=n_layers)
-    elif model_name == 'GCN':
-        return GCN(hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, act=act, dropout=dropout)
-    elif model_name == 'GAT':
-        return GAT(hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, act=act, dropout=dropout)
+    if model_name == 'brain':
+        return BrainNet(hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, heads=heads, dropout=dropout, functional_groups=groups)
+    elif model_name == 'gcn':
+        return GCN(in_channels=116, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, act=act, dropout=dropout)
+    elif model_name == 'gat':
+        return GAT(in_channels=116, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, act=act, dropout=dropout)
     else:
         raise ValueError(f'Unknown model name: {model_name}')

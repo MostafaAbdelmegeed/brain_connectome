@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument('--pooling', type=str, default='mean', help='Pooling method')
     parser.add_argument('--percentile', type=float, default=0.9, help='Percentile for thresholding')
     parser.add_argument('--augmented', action='store_true', help='Use augmented data')
-    parser.add_argument('--model', type=str, default='BrainNet', help='Model name')
+    parser.add_argument('--model', type=str, default='brain', help='Model name')
     return parser.parse_args()
 
 
