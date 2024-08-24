@@ -8,7 +8,7 @@ import random
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Co-embed Data Preparation')
-    parser.add_argument('--dataset', type=str, default='ppmi', help='Dataset name')
+    parser.add_argument('--dataset', type=str, default='', help='Dataset name')
     parser.add_argument('--dataset_path', type=str, default='', help='Path to the dataset')
     parser.add_argument('--percentile', type=float, default=0.9, help='Percentile for thresholding')
     parser.add_argument('--span', type=float, default=0.04, help='Span for randomizing the threshold')
@@ -221,9 +221,12 @@ def main():
     print(f'Number of Edge adjacency matrices: {len(edge_adj)}')
     print(f'Number of Transition matrices: {len(trans)}')
     print("Saving data...")
+    if not dataset_name:
+        dataset_name = 'ppmi' if 'ppmi' in dataset_path else 'adni'
+    path = f'data/{dataset_name}_coembed_p{int(args.percentile*100)}_augmented.pth'
     torch.save({'connectivity': new_connectivity, 'node_adj': node_adj, 
                 'edge_adj': edge_adj, 'transition': trans, 'label': labels}, 
-                f'data/{dataset_name}_coembed_p{int(args.percentile*100)}_augmented.pth')
+                path)
     
     print("Data saved successfully!")
 

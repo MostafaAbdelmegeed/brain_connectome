@@ -156,7 +156,7 @@ class BrainNet(torch.nn.Module):
         super(BrainNet, self).__init__()
         self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
         self.layers = torch.nn.ModuleList()
-        for i in range(num_layers):
+        for _ in range(num_layers):
             self.layers.append(BrainBlock(hidden_channels, hidden_channels, edge_dim, heads=heads, dropout=dropout))
         self.gin = GINConv(Sequential('x', [(Linear(hidden_channels, hidden_channels), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_channels, hidden_channels), 'x -> x')]), train_eps=True)
         self.fc = Linear(hidden_channels, out_channels)
@@ -176,7 +176,7 @@ def get_model(args):
     model_name = args.model
     hidden_dim = args.hidden_dim
     n_layers = args.n_layers
-    out_channels = 4 if args.dataset == 'ppmi' else 2
+    out_channels = 4 # if args.dataset == 'ppmi' else 2
     dropout = args.dropout
     heads = args.heads
     act = LeakyReLU()
