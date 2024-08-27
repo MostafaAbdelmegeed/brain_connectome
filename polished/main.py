@@ -38,7 +38,7 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
         device = torch.device('cuda:{}'.format(args.gpu_id))
-        torch.set_default_device(device)
+        # torch.set_default_device(device)
     torch.autograd.set_detect_anomaly(True)
     dataset_name = args.dataset
     data = torch.load(f'data/{dataset_name}_coembed_p{int(args.percentile*100)}{"_augmented" if args.augmented else ""}.pth')

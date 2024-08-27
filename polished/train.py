@@ -90,7 +90,7 @@ def train(model_name, dataset, device, args):
     writer = SummaryWriter(log_dir=f'polished/runs/{model_name}_{args.dataset}_s{seed}_f{n_folds}_e{epochs}_bs{batch_size}_lr{learning_rate}_hd{hidden_dim}_d{dropout}_h{heads}_l{n_layers}_ts{test_size}_a{args.augmented}_{timestamp}')
     writer.add_text('Arguments', str(args))
 
-    generator = torch.Generator(device=device).manual_seed(seed)
+    generator = torch.Generator().manual_seed(seed)
     # Training and evaluation loop
     for fold, (train_index, test_index) in enumerate(kf.split(dataset, dataset.labels.to('cpu'))):
         print_with_timestamp(f"Fold {fold + 1}/{n_folds}")

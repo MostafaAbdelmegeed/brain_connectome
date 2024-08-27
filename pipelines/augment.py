@@ -136,6 +136,8 @@ def process_and_augment(dataloader, device, percentile=0.9, num_augments=1, span
             label_counts[label] += 1
         else:
             label_counts[label] = 1
+
+    print(f'Labels Count: {label_counts}')
     
     # Determine the target number of samples (equal to the maximum class count)
     target_count = max(label_counts.values())
@@ -185,6 +187,7 @@ def main():
         data = torch.load(f'data/{dataset_name}.pth')
     else:
         data = torch.load(dataset_path)
+        dataset_name = 'ppmi' if 'ppmi' in dataset_path else 'adni'
     span = args.span
     connectivity = data['matrix']
     label = data['label']
@@ -194,6 +197,8 @@ def main():
         connectivity = connectivity.unsqueeze(0)
     elif connectivity.dim() != 3:
         raise ValueError("Connectivity matrix must be 2D or 3D")
+
+    print(f'Labels Unique: {label.unique()}')
 
     # Prepare DataLoader
     tensor_dataset = TensorDataset(connectivity, label)
@@ -216,6 +221,7 @@ def main():
 
     # print(f"Number of samples per class: {np.bincount(np.array(labels))}")
     print(f"Total number of labels: {labels.shape}")
+    print(f'Unique Labels: {labels.unique()}')
     print(f'Number of Connectivity matrices: {len(new_connectivity)}')
     print(f'Number of Node adjacency matrices: {len(node_adj)}')
     print(f'Number of Edge adjacency matrices: {len(edge_adj)}')
@@ -228,7 +234,7 @@ def main():
                 'edge_adj': edge_adj, 'transition': trans, 'label': labels}, 
                 path)
     
-    print("Data saved successfully!")
+    print(f"Data saved to data/{dataset_name}_coembed_p{int(args.percentile*100)}_augmented.pth")
 
 if __name__ == '__main__':
     main()

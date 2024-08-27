@@ -44,13 +44,16 @@ class BrainEncodeEmbed(MessagePassing):
         return encoding
 
     def forward(self, data):
+        
         x = data.x
         edge_attr = data.edge_attr
         n_adj = data.node_adj
         e_adj = data.edge_adj
         transition = data.transition
+        
         batch_size = data.num_graphs
-        expanded_encoding = self.encoding.repeat(batch_size, 1)
+        expanded_encoding = self.encoding.repeat(batch_size, 1).to(x.device)
+
         if x is not None:
             x = torch.cat([x, expanded_encoding], dim=-1)
         x = self.linear(x)
@@ -176,7 +179,7 @@ def get_model(args):
     model_name = args.model
     hidden_dim = args.hidden_dim
     n_layers = args.n_layers
-    out_channels = 4 # if args.dataset == 'ppmi' else 2
+    out_channels = 4 #
     dropout = args.dropout
     heads = args.heads
     act = LeakyReLU()
