@@ -5,6 +5,7 @@ import scipy.sparse as sp
 from tqdm import tqdm
 import argparse
 import random
+import math
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Co-embed Data Preparation')
@@ -137,10 +138,18 @@ def process_and_augment(dataloader, device, percentile=0.9, num_augments=1, span
         else:
             label_counts[label] = 1
 
+    label_counts = dict(sorted(label_counts.items()))
+
     print(f'Labels Count: {label_counts}')
+
+    
     
     # Determine the target number of samples (equal to the maximum class count)
     target_count = max(label_counts.values())
+    print(f'Target Count: {target_count}')
+
+    n_augments = [round((target_count - n)/n) for _, n in label_counts.items()]
+    print(f'Number of Augments: {n_augments}')
 
     new_connectivity_list = []
     node_adj_list = []
@@ -159,8 +168,8 @@ def process_and_augment(dataloader, device, percentile=0.9, num_augments=1, span
         label_list.append(label.cpu())
         
         # Augment if this is a minority class sample and it needs more samples
-        while label_counts[label.item()] < target_count:
-            augmented_connectivities = augment_minority_class(new_conn, connectivity, num_augments=num_augments, device=device, percentile=percentile, span=span)
+        if label_counts[label.item()] < target_count:
+            augmented_connectivities = augment_minority_class(new_conn, connectivity, num_augments=n_augments[label.item()], device=device, percentile=percentile, span=span)
             for aug_conn in augmented_connectivities:
                 aug_n_adj = node_adjacency_matrix(aug_conn).to(device)
                 aug_e_adj = edge_adjacency_matrix(aug_n_adj, device)
@@ -171,9 +180,8 @@ def process_and_augment(dataloader, device, percentile=0.9, num_augments=1, span
                 edge_adj_list.append(aug_e_adj.cpu())
                 trans_list.append(aug_t.cpu())
                 label_list.append(label.cpu())
-            
             # Update the count of the augmented class
-            label_counts[label.item()] += 1
+            label_counts[label.item()] += len(augmented_connectivities)
 
     return new_connectivity_list, node_adj_list, edge_adj_list, trans_list, label_list
 
@@ -219,7 +227,7 @@ def main():
     labels = torch.stack(labels).squeeze(1)
 
 
-    # print(f"Number of samples per class: {np.bincount(np.array(labels))}")
+    print(f"Number of samples per class: {np.bincount(np.array(labels))}")
     print(f"Total number of labels: {labels.shape}")
     print(f'Unique Labels: {labels.unique()}')
     print(f'Number of Connectivity matrices: {len(new_connectivity)}')
