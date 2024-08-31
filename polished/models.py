@@ -3,9 +3,11 @@ import torch
 import math
 import numpy as np
 from torch.nn import Module, Parameter, Dropout, LeakyReLU
-from torch_geometric.nn import MessagePassing, global_mean_pool, GATv2Conv, BatchNorm, GCNConv, Linear, ResGatedGraphConv, Sequential, GINConv
+from torch_geometric.nn import MessagePassing, global_mean_pool, global_max_pool, GATv2Conv, BatchNorm, GCNConv, Linear, ResGatedGraphConv, Sequential, GINConv
 from torch_geometric.nn.models import GCN, GAT
 from encoding import yeo_network
+import torch.nn as nn
+import torch.nn.functional as F
 
 
 class BrainEncodeEmbed(MessagePassing):
@@ -137,6 +139,36 @@ class AlternateConvolution(Module):
         return self.__class__.__name__ + ' (' + str(self.in_features_v) + ' -> ' + str(self.out_features_v) + '), (' + str(self.in_features_e) + ' -> ' + str(self.out_features_e) + ')'
 
 
+class AttentionPooling(nn.Module):
+    def __init__(self, in_features, hidden_dim):
+        super(AttentionPooling, self).__init__()
+        self.project = nn.Sequential(
+            nn.Linear(in_features, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, 1, bias=False)
+        )
+
+    def forward(self, x, batch, mask=None):
+        # x: shape [total_num_nodes, in_features]
+        # batch: shape [total_num_nodes] (indicating the graph index for each node)
+        
+        # Compute attention weights
+        weights = self.project(x).squeeze(-1)  # Shape: [total_num_nodes]
+        if mask is not None:
+            weights = weights.masked_fill(mask == 0, -1e9)  # Apply mask
+        weights = F.softmax(weights, dim=0)  # Normalize across nodes
+        
+        # Compute the weighted sum of node features per graph
+        x = x * weights.unsqueeze(-1)  # Shape: [total_num_nodes, in_features]
+        x = torch.zeros_like(x).scatter_add_(0, batch.unsqueeze(-1).expand_as(x), x)
+        
+        # Pooling using the scatter_add result based on the batch index
+        x = torch.zeros(batch.max() + 1, x.size(1), device=x.device).scatter_add_(
+            0, batch.unsqueeze(-1).expand_as(x), x
+        )  # Shape: [num_graphs, in_features]
+        
+        return x, weights
+
 class BrainBlock(Module):
     def __init__(self, in_features, out_features, edge_dim, heads=1, dropout=0.7):
         super(BrainBlock, self).__init__()
@@ -162,16 +194,19 @@ class BrainNet(torch.nn.Module):
         for _ in range(num_layers):
             self.layers.append(BrainBlock(hidden_channels, hidden_channels, edge_dim, heads=heads, dropout=dropout))
         self.gin = GINConv(Sequential('x', [(Linear(hidden_channels, hidden_channels), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_channels, hidden_channels), 'x -> x')]), train_eps=True)
+        self.pool = AttentionPooling(hidden_channels, hidden_channels)
         self.fc = Linear(hidden_channels, out_channels)
 
     def forward(self, data):
         x, edge_attr = self.encemb(data)
-        for i, layer in enumerate(self.layers):
+        for _, layer in enumerate(self.layers):
             x = layer(x, data.edge_index, edge_attr)
         x = self.gin(x, data.edge_index)
-        x = global_mean_pool(x, data.batch)
-        x = self.fc(x) # Remove of performance impacted
-        return x
+        x, attn_weights = self.pool(x, data.batch, mask=None)
+        x = self.fc(x)
+        return x, attn_weights
+    
+
     
 
 

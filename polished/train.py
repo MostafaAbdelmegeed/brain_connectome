@@ -117,9 +117,8 @@ def train(model_name, dataset, device, args):
         test_loader.collate_fn = collate_function
 
         model = get_model(args).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-5, lr=learning_rate)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=patience//3)
-        fold_gradients = {}
+        optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-3, lr=learning_rate)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
 
         # Class weights
         class_weights = compute_class_weight('balanced', classes=np.unique(dataset.labels.to('cpu').numpy()), y=dataset.labels.to('cpu').numpy())
@@ -141,7 +140,7 @@ def train(model_name, dataset, device, args):
             for data in train_loader:
                 data = data.to(device)
                 optimizer.zero_grad()
-                output = model(data)
+                output, attn_weights = model(data)
                 loss = criterion(output, data.y)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -167,7 +166,7 @@ def train(model_name, dataset, device, args):
             with torch.no_grad():
                 for data in val_loader:
                     data = data.to(device)
-                    output = model(data)
+                    output, attn_weights = model(data)
                     loss = criterion(output, data.y)
                     val_loss += loss.item()
                     preds = output.argmax(dim=1)
@@ -191,7 +190,8 @@ def train(model_name, dataset, device, args):
                 if patience_counter >= patience:
                     print_with_timestamp(f"Early stopping at epoch {epoch + 1}")
                     break
-
+        # Step the scheduler after each epoch
+        scheduler.step()
         # Load the best model state
         model.load_state_dict(best_model_state)
         
@@ -203,7 +203,7 @@ def train(model_name, dataset, device, args):
         for data in test_loader:
             data = data.to(device)
             with torch.no_grad():
-                output = model(data)
+                output, attn_weights = model(data)
                 preds = output.argmax(dim=1)
                 test_preds.extend(preds.cpu().numpy())
                 test_labels.extend(data.y.cpu().numpy())
