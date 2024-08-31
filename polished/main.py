@@ -8,6 +8,10 @@ import numpy as np
 
 # python polished/main.py --gpu_id 0 --dataset ppmi --seed 10 --n_folds 10 --epochs 300 --batch_size 8 --learning_rate 0.0001 --hidden_dim 256 --n_layers 1 --dropout 0.5 --heads 1 --patience 30 --test_size 0.2 --percentile 0.9 --augmented --model brain
 
+def print_with_timestamp(message):
+    timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
+    print(f"{timestamp}\t{message}")
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Train GNN on connectivity data")
     parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID to use')
@@ -31,6 +35,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    print_with_timestamp(args)
     device = 'cpu'
     seed = args.seed
     np.random.seed(seed)
