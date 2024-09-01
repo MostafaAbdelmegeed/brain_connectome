@@ -194,7 +194,6 @@ class BrainNet(torch.nn.Module):
         for _ in range(num_layers):
             self.layers.append(BrainBlock(hidden_channels, hidden_channels, edge_dim, heads=heads, dropout=dropout))
         self.gin = GINConv(Sequential('x', [(Linear(hidden_channels, hidden_channels), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_channels, hidden_channels), 'x -> x')]), train_eps=True)
-        self.pool = AttentionPooling(hidden_channels, hidden_channels)
         self.fc = Linear(hidden_channels, out_channels)
 
     def forward(self, data):
@@ -202,9 +201,9 @@ class BrainNet(torch.nn.Module):
         for _, layer in enumerate(self.layers):
             x = layer(x, data.edge_index, edge_attr)
         x = self.gin(x, data.edge_index)
-        x, attn_weights = self.pool(x, data.batch, mask=None)
+        x = global_mean_pool(x, data.batch)
         x = self.fc(x)
-        return x, attn_weights
+        return x
     
 
     
