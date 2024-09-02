@@ -4,13 +4,10 @@ import numpy as np
 import datetime
 
 from torch.utils.tensorboard import SummaryWriter
-from sklearn.metrics import f1_score, accuracy_score, precision_score, confusion_matrix
+from sklearn.metrics import f1_score, accuracy_score, precision_score, confusion_matrix, recall_score
 from sklearn.utils.class_weight import compute_class_weight
-from sklearn.model_selection import StratifiedKFold, train_test_split, StratifiedShuffleSplit
+from sklearn.model_selection import StratifiedKFold, train_test_split
 from torch_geometric.loader import DataLoader
-from dataset import BrainDataset
-
-from torch.utils.data import TensorDataset, Subset
 
 from dataset import collate_function
 from models import get_model
@@ -18,8 +15,6 @@ from models import get_model
 import matplotlib.pyplot as plt
 from io import BytesIO
 import PIL.Image
-
-from preprocessing import process
 
 def print_with_timestamp(message):
     timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
@@ -67,7 +62,7 @@ def plot_to_image(figure):
     
     return image
 
-def train(model_name, device, args):
+def train(model_name, dataset, device, args):
     # Hyperparameters
     n_folds = args.n_folds
     seed = args.seed
@@ -78,23 +73,17 @@ def train(model_name, device, args):
     dropout = args.dropout
     patience = args.patience
     heads = args.heads
-    augmenation_span = args.span
     n_layers = args.n_layers
-    val_size = args.test_size
-    dataset = args.dataset
+    test_size = args.test_size
     n_nodes = 116
-    edge_dim = 5
-    out_dim = 4
+    edge_dim = dataset.edge_features_count()
+    out_dim = 4 if args.dataset == 'ppmi' else 2
     # Cross-validation setup
-    skf = StratifiedKFold(n_splits=n_folds, random_state=seed, test_size=test_size)
+    kf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
     # Initialize lists to store metrics for all folds
-    all_fold_metrics = {'accuracy': [], 'precision': [], 'f1': [], 'conf_matrix':[]}
+    all_fold_metrics = {'accuracy': [], 'precision': [], 'recall': [], 'f1': [], 'conf_matrix':[]}
 
-    dataset = torch.load(f'data/{dataset}.pth')
-    dataset = {key: dataset[key] for key in ['matrix', 'label']}
-    matrices = dataset['matrix']
-    labels = dataset['label']
-    dataset = TensorDataset(matrices, labels)
+
     # Get the current timestamp
     timestamp = datetime.datetime.now().strftime("%m-%d-%H-%M-%S")
     # TensorBoard writer
@@ -103,74 +92,40 @@ def train(model_name, device, args):
 
     generator = torch.Generator().manual_seed(seed)
     # Training and evaluation loop
-    for fold, (train_index, test_index) in enumerate(skf.split(matrices, labels)):
+    for fold, (train_index, test_index) in enumerate(kf.split(dataset, dataset.labels.to('cpu'))):
         print_with_timestamp(f"Fold {fold + 1}/{n_folds}")
-        train_data = Subset(dataset, train_index)
-        test_data = Subset(dataset, test_index)
-        train_indices, val_indices = train_test_split(range(len(train_data)), test_size=val_size, random_state=seed)
-        train_subset = Subset(train_data, train_indices)
-        val_subset = Subset(train_data, val_indices)
-
-        # Create a DataLoader for the training subset with batch_size=1 for individual processing
-        train_loader_for_process_and_augment = DataLoader(
-            train_subset, batch_size=1, shuffle=False, generator=generator
-        )
-        val_loader_for_process = DataLoader(
-            val_subset, batch_size=1, shuffle=False, generator=generator
-        )
-        test_loader_for_process = DataLoader(
-            test_data, batch_size=1, shuffle=False, generator=generator
-        )
-        
-        # Perform data augmentation
-        augmented_train_data = process(
-            train_loader_for_process_and_augment, 
-            device=device, 
-            percentile=args.percentile, 
-            span=augmenation_span,
-            augment=args.augmented
-        )
-
-        processed_val_data = process(val_loader_for_process, device=device, percentile=args.percentile, augment=args.augment_validation, span=augmenation_span)
-        processed_test_data = process(test_loader_for_process, device=device, percentile=args.percentile)
-
-        # Directly use the augmented data for training
-        augmented_train_dataset = BrainDataset(augmented_train_data)
-        val_dataset = BrainDataset(processed_val_data)
-        test_dataset = BrainDataset(processed_test_data)
-
-        # Extract labels from each dataset
-        train_labels = [data.y.item() for data in augmented_train_dataset]
-        val_labels = [data.y.item() for data in val_dataset]
-        test_labels = [data.y.item() for data in test_dataset]
-
-        # Calculate label distributions
-        train_label_distribution = np.bincount(train_labels)
-        val_label_distribution = np.bincount(val_labels)
-        test_label_distribution = np.bincount(test_labels)
+        train_data = torch.utils.data.Subset(dataset, train_index)
+        test_data = torch.utils.data.Subset(dataset, test_index)
+        train_indices, val_indices = train_test_split(range(len(train_data)), test_size=test_size, random_state=seed)
+        train_subset = torch.utils.data.Subset(train_data, train_indices)
+        val_subset = torch.utils.data.Subset(train_data, val_indices)
 
         # Print label distributions
-        print("Training labels distribution:", train_label_distribution)
-        print("Validation labels distribution:", val_label_distribution)
-        print("Test labels distribution:", test_label_distribution)
+        train_labels = [dataset.labels[idx].item() for idx in train_index]
+        val_labels = [dataset.labels[train_index[idx]].item() for idx in val_indices]
+        test_labels = [dataset.labels[idx].item() for idx in test_index]
+        
+        print_with_timestamp(f"Training labels distribution: {np.bincount(train_labels)}")
+        print_with_timestamp(f"Validation labels distribution: {np.bincount(val_labels)}")
+        print_with_timestamp(f"Test labels distribution: {np.bincount(test_labels)}")
 
-        train_loader = DataLoader(augmented_train_dataset, batch_size=batch_size, shuffle=True, generator=generator)
+        train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True, generator=generator)
         train_loader.collate_fn = collate_function
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, generator=generator)
+        val_loader = DataLoader(val_subset, batch_size=batch_size, shuffle=False, generator=generator)
         val_loader.collate_fn = collate_function
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, generator=generator)
+        test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False, generator=generator)
         test_loader.collate_fn = collate_function
 
         model = get_model(args).to(device)
         optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-5, lr=learning_rate)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
 
-        # # Class weights
-        # class_weights = compute_class_weight('balanced', classes=np.unique(dataset.labels.to('cpu').numpy()), y=dataset.labels.to('cpu').numpy())
-        # class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
-        # print_with_timestamp(f'Class weights: {class_weights}')
+        # Class weights
+        class_weights = compute_class_weight('balanced', classes=np.unique(dataset.labels.to('cpu').numpy()), y=dataset.labels.to('cpu').numpy())
+        class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
+        print_with_timestamp(f'Class weights: {class_weights}')
         print_with_timestamp(f"Epoch/Loss\t||\tTraining\t|\tValidation\t")
-        criterion = torch.nn.CrossEntropyLoss().to(device)
+        criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(device)
 
         best_val_loss = float('inf')
         patience_counter = 0
@@ -236,7 +191,7 @@ def train(model_name, device, args):
                     print_with_timestamp(f"Early stopping at epoch {epoch + 1}")
                     break
         # Step the scheduler after each epoch
-        scheduler.step(metrics=val_loss)
+        scheduler.step(metrics=val_loss, epoch=epoch)
         # Load the best model state
         model.load_state_dict(best_model_state)
         
@@ -257,6 +212,7 @@ def train(model_name, device, args):
         # Compute metrics
         acc = accuracy_score(test_labels, test_preds)
         precision = precision_score(test_labels, test_preds, average='weighted', zero_division=0)
+        recall = recall_score(test_labels, test_preds, average='weighted', zero_division=0)
         f1 = f1_score(test_labels, test_preds, average='weighted')
 
         # Confusion matrix for the test set
@@ -264,28 +220,32 @@ def train(model_name, device, args):
 
         writer.add_scalar(f'Fold_{fold+1}/Test_Accuracy', acc, epoch)
         writer.add_scalar(f'Fold_{fold+1}/Test_Precision', precision, epoch)
+        writer.add_scalar(f'Fold_{fold+1}/Test_Recall', recall, epoch)
         writer.add_scalar(f'Fold_{fold+1}/Test_F1', f1, epoch)
-        print_with_timestamp(f"Fold {fold + 1} Metrics: Accuracy: {acc:.4f}, Precision: {precision:.4f}, F1 Score: {f1:.4f}")
+        print_with_timestamp(f"Fold {fold + 1} Metrics: Accuracy: {acc:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1 Score: {f1:.4f}")
 
         # Store metrics for the current fold
         all_fold_metrics['accuracy'].append(acc)
         all_fold_metrics['precision'].append(precision)
+        all_fold_metrics['recall'].append(recall)
         all_fold_metrics['f1'].append(f1)
         all_fold_metrics['conf_matrix'].append(conf_matrix)
 
         # Print average metrics until the latest fold
         avg_accuracy = np.mean(all_fold_metrics['accuracy'])
         avg_precision = np.mean(all_fold_metrics['precision'])
+        avg_recall = np.mean(all_fold_metrics['recall'])
         avg_f1 = np.mean(all_fold_metrics['f1'])
-        print_with_timestamp(f"Average Metrics until Fold {fold + 1}: Accuracy: {avg_accuracy:.4f}, Precision: {avg_precision:.4f}, F1 Score: {avg_f1:.4f}")
+        print_with_timestamp(f"Average Metrics until Fold {fold + 1}: Accuracy: {avg_accuracy:.4f}, Precision: {avg_precision:.4f}, Recall: {avg_recall:.4f}, F1 Score: {avg_f1:.4f}")
 
     # Compute and print final metrics after cross-validation
     final_accuracy = np.mean(all_fold_metrics['accuracy'])
     final_precision = np.mean(all_fold_metrics['precision'])
+    final_recall = np.mean(all_fold_metrics['recall'])
     final_f1 = np.mean(all_fold_metrics['f1'])
 
     print_with_timestamp("Training completed.")
-    print_with_timestamp(f"Final Metrics | Accuracy: {final_accuracy:.4f} | Precision: {final_precision:.4f} | F1 Score: {final_f1:.4f}")
+    print_with_timestamp(f"Final Metrics | Accuracy: {final_accuracy:.4f} | Precision: {final_precision:.4f} | Recall: {final_recall:.4f} | F1 Score: {final_f1:.4f}")
 
     # Print the average confusion matrix
     avg_conf_matrix = np.mean(all_fold_metrics['conf_matrix'], axis=0)

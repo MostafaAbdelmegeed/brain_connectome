@@ -8,7 +8,7 @@ class BrainDataset(Dataset):
         self.node_adjacencies = data['node_adj']
         self.edge_adjacencies = data['edge_adj']
         self.transition = data['transition']
-        self.labels = data['label'].type(torch.long)
+        self.labels = data['label']
         self.node_num = self.connectivities[0].shape[0]
         self.left_indices, self.right_indices = self.get_hemisphere_indices()
     
@@ -29,11 +29,17 @@ class BrainDataset(Dataset):
     def isHomo(self, i, j):
         return i // 2 == j // 2 and abs(i - j) == 1
     
-    def edge_features_count(self):
-        return 5
+    def node_count(self):
+        return self.node_num
+
+    def edge_count(self):
+        return self.edge_adjacencies[0].shape[0]
     
-    def node_features_count(self):
-        return 116
+    def unique_labels(self):
+        return torch.unique(self.labels)
+    
+    def num_classes(self):
+        return len(self.unique_labels())
 
     def __len__(self):
         return len(self.connectivities)

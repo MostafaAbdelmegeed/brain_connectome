@@ -29,6 +29,8 @@ def parse_args():
     parser.add_argument('--test_size', type=float, default=0.2, help='Test size for splitting data')
     parser.add_argument('--percentile', type=float, default=0.9, help='Percentile for thresholding')
     parser.add_argument('--augmented', action='store_true', help='Use augmented data')
+    parser.add_argument('--augment_validation', action='store_true', help='Augment validation data')
+    parser.add_argument('--span', type=float, default=0.02, help='Span for augmented data')
     parser.add_argument('--model', type=str, default='brain', help='Model name')
     return parser.parse_args()
 
@@ -45,10 +47,7 @@ def main():
         device = torch.device('cuda:{}'.format(args.gpu_id))
         # torch.set_default_device(device)
     torch.autograd.set_detect_anomaly(True)
-    dataset_name = args.dataset
-    data = torch.load(f'data/{dataset_name}_coembed_p{int(args.percentile*100)}{"_augmented" if args.augmented else ""}.pth')
-    dataset = BrainDataset(data)
-    train(args.model, dataset, device, args)
+    train(args.model, device, args)
 
 if __name__ == "__main__":
     main()

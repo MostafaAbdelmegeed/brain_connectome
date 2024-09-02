@@ -5,17 +5,10 @@ import scipy.sparse as sp
 from tqdm import tqdm
 import argparse
 import random
-import math
+import sys
 
-def parse_args():
-    parser = argparse.ArgumentParser(description='Co-embed Data Preparation')
-    parser.add_argument('--dataset', type=str, default='', help='Dataset name')
-    parser.add_argument('--dataset_path', type=str, default='', help='Path to the dataset')
-    parser.add_argument('--percentile', type=float, default=0.9, help='Percentile for thresholding')
-    parser.add_argument('--span', type=float, default=0.04, help='Span for randomizing the threshold')
-    parser.add_argument('--n_augments', type=int, default=1, help='Number of augmented samples to generate for the minority class')
-    parser.add_argument('--gpu_id', type=int, default=0, help='Device to use')
-    return parser.parse_args()
+is_interactive = sys.stdout.isatty()
+
 
 def sparse_mx_to_torch_sparse_tensor(sparse_mx, device=None):
     """Convert a scipy sparse matrix to a torch sparse tensor."""
@@ -126,30 +119,20 @@ def augment_minority_class(connectivity, original_connectivity, num_augments=1, 
 
     return augmented_samples
 
-def process_and_augment(dataloader, device, percentile=0.9, span=0.04):
-    print("Processing and augmenting data...")
-
-    # Calculate current class distribution
+def process(dataloader, device, percentile=0.9, span=0.04, augment=False):
     label_counts = {}
+    # Calculate current class distribution
     for _, label in dataloader:
         label = label.item()
         if label in label_counts:
             label_counts[label] += 1
         else:
             label_counts[label] = 1
-
     label_counts = dict(sorted(label_counts.items()))
-
-    print(f'Labels Count: {label_counts}')
-
-    
-    
     # Determine the target number of samples (equal to the maximum class count)
     target_count = max(label_counts.values())
-    print(f'Target Count: {target_count}')
-
     n_augments = [round((target_count - n)/n) for _, n in label_counts.items()]
-    print(f'Number of Augments: {n_augments}')
+
 
     new_connectivity_list = []
     node_adj_list = []
@@ -157,7 +140,7 @@ def process_and_augment(dataloader, device, percentile=0.9, span=0.04):
     trans_list = []
     label_list = []
 
-    for connectivity, label in tqdm(dataloader, desc="Processing matrices"):
+    for connectivity, label in tqdm(dataloader, desc="Processing matrices", disable=not is_interactive):
         connectivity = connectivity[0].squeeze(0).to(device)
         # Generate original and augmented samples
         new_conn, n_adj, e_adj, t = coembed_pipeline(connectivity, device=device, percentile=percentile)
@@ -167,8 +150,9 @@ def process_and_augment(dataloader, device, percentile=0.9, span=0.04):
         trans_list.append(t.cpu())
         label_list.append(label.cpu())
         
+
         # Augment if this is a minority class sample and it needs more samples
-        if label_counts[label.item()] < target_count:
+        if augment and (label_counts[label.item()] < target_count):
             augmented_connectivities = augment_minority_class(new_conn, connectivity, num_augments=n_augments[label.item()], device=device, percentile=percentile, span=span)
             for aug_conn in augmented_connectivities:
                 aug_n_adj = node_adjacency_matrix(aug_conn).to(device)
@@ -182,58 +166,12 @@ def process_and_augment(dataloader, device, percentile=0.9, span=0.04):
                 label_list.append(label.cpu())
             # Update the count of the augmented class
             label_counts[label.item()] += len(augmented_connectivities)
+            # Convert augmented lists to tensors directly
 
-    return new_connectivity_list, node_adj_list, edge_adj_list, trans_list, label_list
-
-
-
-def main():
-    args = parse_args()
-    dataset_name = args.dataset
-    dataset_path = args.dataset_path
-    if not dataset_path:
-        data = torch.load(f'data/{dataset_name}.pth')
-    else:
-        data = torch.load(dataset_path)
-        dataset_name = 'ppmi' if 'ppmi' in dataset_path else 'adni'
-    span = args.span
-    connectivity = data['matrix']
-    label = data['label']
-    n_augments = args.n_augments
-    # Ensure connectivity is 3D: (num_samples, num_nodes, num_nodes)
-    if connectivity.dim() == 2:
-        connectivity = connectivity.unsqueeze(0)
-    elif connectivity.dim() != 3:
-        raise ValueError("Connectivity matrix must be 2D or 3D")
-
-    print(f'Labels Unique: {label.unique()}')
-
-    # Prepare DataLoader
-    tensor_dataset = TensorDataset(connectivity, label)
-    dataloader = DataLoader(tensor_dataset, batch_size=1, shuffle=False, num_workers=4)
-
-    device = torch.device(f'cuda:{args.gpu_id}' if torch.cuda.is_available() else 'cpu')
-
-    new_connectivity, node_adj, edge_adj, transition, labels = process_and_augment(dataloader, device, args.percentile, num_augments=n_augments, span=span)
-    labels = torch.stack(labels).squeeze(1)
-
-
-    print(f"Number of samples per class: {np.bincount(np.array(labels))}")
-    print(f"Total number of labels: {labels.shape}")
-    print(f'Unique Labels: {labels.unique()}')
-    print(f'Number of Connectivity matrices: {len(new_connectivity)}')
-    print(f'Number of Node adjacency matrices: {len(node_adj)}')
-    print(f'Number of Edge adjacency matrices: {len(edge_adj)}')
-    print(f'Number of Transition matrices: {len(transition)}')
-    print("Saving data...")
-    if not dataset_name:
-        dataset_name = 'ppmi' if 'ppmi' in dataset_path else 'adni'
-    path = f'data/{dataset_name}_coembed_p{int(args.percentile*100)}_augmented.pth'
-    torch.save({'connectivity': new_connectivity, 'node_adj': node_adj, 
-                'edge_adj': edge_adj, 'transition': transition, 'label': labels}, 
-                path)
-    
-    print(f"Data saved to data/{dataset_name}_coembed_p{int(args.percentile*100)}_augmented.pth")
-
-if __name__ == '__main__':
-    main()
+    return {
+        'connectivity': new_connectivity_list,
+        'node_adj': node_adj_list,
+        'edge_adj': edge_adj_list,
+        'transition': trans_list,
+        'label': label_list
+    }
