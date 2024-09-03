@@ -107,7 +107,11 @@ def train(model_name, device, args):
         print_with_timestamp(f"Fold {fold + 1}/{n_folds}")
         train_data = Subset(dataset, train_index)
         test_data = Subset(dataset, test_index)
-        train_indices, val_indices = train_test_split(range(len(train_data)), test_size=val_size, random_state=seed)
+        # Create StratifiedShuffleSplit instance for splitting train_data into train/val
+        # Extract labels for train_data subset
+        training_labels = [labels[i] for i in train_index]
+        stratified_split = StratifiedShuffleSplit(n_splits=1, test_size=val_size, random_state=seed)
+        train_indices, val_indices = next(stratified_split.split(range(len(train_data)), training_labels))
         train_subset = Subset(train_data, train_indices)
         val_subset = Subset(train_data, val_indices)
 
@@ -162,7 +166,7 @@ def train(model_name, device, args):
         test_loader.collate_fn = collate_function
 
         model = get_model(args).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-5, lr=learning_rate)
+        optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-4, lr=learning_rate)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
 
         # # Class weights
