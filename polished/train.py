@@ -86,7 +86,7 @@ def train(model_name, device, args):
     edge_dim = 5
     out_dim = 4
     # Cross-validation setup
-    skf = StratifiedKFold(n_splits=n_folds, random_state=seed)
+    skf = StratifiedKFold(n_splits=n_folds, random_state=seed, shuffle=True)
     # Initialize lists to store metrics for all folds
     all_fold_metrics = {'accuracy': [], 'precision': [], 'f1': [], 'conf_matrix':[]}
 
