@@ -83,41 +83,63 @@ def coembed_pipeline(connectivity, percentile=0.9, device=None):
     t = transition_matrix(n_adj, device)
     return new_connectivity, n_adj, e_adj, t
 
-def augment_minority_class(connectivity, original_connectivity, num_augments=1, device=None, percentile=0.9, span=0.04):
-    """Generate augmented samples for the minority class by varying the percentile thresholds and adding/removing edges."""
+def augment_minority_class(connectivity, original_connectivity, num_augments=1, device=None, percentile=0.9, span=0.04, max_mods=50):
+    """Generate augmented samples for the minority class by randomly adding/removing edges."""
     augmented_samples = []
+    # edge_counts = []
     
     abs_conn = torch.abs(connectivity)
     abs_original_conn = torch.abs(original_connectivity)  # Absolute values of the original matrix
-
+    # print(f'--------- Number of edges in origin: {torch.sum(abs_original_conn > 0)}')
+    # print(f'--------- Number of edges in source: {torch.sum(abs_conn > 0)}')
     for _ in range(num_augments):
-        randomized_span = random.uniform(-span/2, span/2)
+        randomized_span = random.uniform(-span, 0)
+        
         # Generate the threshold based on the original connectivity matrix
-        lower_threshold = torch.quantile(abs_original_conn, percentile+randomized_span)
-        mid_threshold = torch.quantile(abs_original_conn, percentile+randomized_span)
-        upper_threshold = torch.quantile(abs_original_conn, 1.0)
+        lower_threshold = torch.quantile(abs_original_conn, percentile+randomized_span*2)
+        # print(f'Lower percentile: {percentile+randomized_span}, lower_threshold: {lower_threshold}')
+        upper_threshold = torch.quantile(abs_original_conn, 1.0+randomized_span)
+        # print(f'Upper percentile: {1.0+randomized_span}, upper_threshold: {upper_threshold}')
 
-
-        # Suppress edges below the lower threshold in the current connectivity matrix
-        suppressed_conn = torch.where(abs_conn > mid_threshold, connectivity, torch.zeros_like(connectivity))
-        
-        # Add edges from the original matrix that were removed but are within the percentile range
-        added_edges_conn = torch.where(
-            (abs_original_conn <= upper_threshold) & (abs_original_conn > lower_threshold),
-            original_connectivity,
-            suppressed_conn
-        )
-        
-        # Randomly decide to add or remove edges in the given percentile range
-        add_or_remove = random.choice(['add', 'remove'])
-        if add_or_remove == 'add':
-            new_connectivity = added_edges_conn
-        else:
-            new_connectivity = suppressed_conn
-        
-        augmented_samples.append(new_connectivity.to(device))
-
+        # Generate all possible (i, j) pairs excluding self-loops (i == j)
+        indices = [(i, j) for i in range(connectivity.size(0)) for j in range(i+1, connectivity.size(1))]
+        # Start with a copy of the original connectivity matrix
+        augmented_conn = connectivity.clone()
+        add_mods = 0
+        remove_mods = 0
+        # Iterate over all elements in the connectivity matrix
+        # Shuffle indices for random order
+        random.shuffle(indices)
+        for i, j in indices:
+            if i != j:  # Avoid self-loops if your context requires it
+                edge_strength = abs_conn[i, j]
+                original_edge_strength = abs_original_conn[i, j]
+                # Decide randomly to add or remove the edge
+                if random.random() < 0.9:  # Randomly decide to add or remove
+                    # Add the edge if it was suppressed but within the percentile range
+                    if edge_strength < lower_threshold and lower_threshold <= original_edge_strength <= upper_threshold:
+                        augmented_conn[i, j] = original_connectivity[i, j]
+                        augmented_conn[j, i] = original_connectivity[j, i]
+                        add_mods += 1
+                else:
+                    # Remove the edge if it's above the threshold
+                    if edge_strength > lower_threshold and lower_threshold <= original_edge_strength <= upper_threshold:
+                        augmented_conn[i, j] = 0
+                        augmented_conn[j, i] = 0
+                        remove_mods += 1
+            if add_mods+remove_mods >= max_mods:
+                break
+        # num_edges = torch.sum(torch.abs(augmented_conn) > 0).item()
+        # edge_counts.append(num_edges)
+        # print(f'Number of edges in augmented: {num_edges}')
+        # print(f'Number of added edges: {add_mods}, number of removed edges: {remove_mods}')
+        augmented_samples.append(augmented_conn.to(device))
+    
+    # Calculate the mean number of edges per augmented sample
+    # mean_num_edges = sum(edge_counts) / len(edge_counts) if edge_counts else 0
+    # print(f'============= Mean number of edges per augmented sample: {mean_num_edges}')
     return augmented_samples
+
 
 def process(dataloader, device, percentile=0.9, span=0.04, augment=False):
     label_counts = {}
