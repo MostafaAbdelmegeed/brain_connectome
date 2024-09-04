@@ -203,7 +203,7 @@ class BrainNet(torch.nn.Module):
         x, edge_attr = self.encemb(data)
         # for _, layer in enumerate(self.layers):
         #     x = layer(x, data.edge_index, edge_attr)
-        # x = self.gin(x, data.edge_index)
+        x = self.gin(x, data.edge_index)
         # x = global_mean_pool(x, data.batch)
         # x = F.leaky_relu(self.fc1(x))
         # x = self.fc2(x)
