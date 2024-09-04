@@ -2,6 +2,76 @@ import torch
 from torch_geometric.data import Data, Dataset, Batch
 
 
+class VanillaDataset(Dataset):
+    def __init__(self, data):
+        self.connectivities = data['connectivity']
+        self.node_adjacencies = data['node_adj']
+        self.edge_adjacencies = data['edge_adj']
+        self.transition = data['transition']
+        self.labels = data['label']
+        self.node_num = self.connectivities[0].shape[0]
+
+    def node_count(self):
+        return self.node_num
+
+    def edge_count(self):
+        return self.edge_adjacencies[0].shape[0]
+    
+    def unique_labels(self):
+        return torch.unique(self.labels)
+    
+    def num_classes(self):
+        return len(self.unique_labels())
+    
+    def edge_attr_dim(self):
+        return 1
+
+    def __len__(self):
+        return len(self.connectivities)
+
+    def __getitem__(self, idx):
+        connectivity = self.connectivities[idx]
+        node_adj = self.node_adjacencies[idx]
+        edge_adj = self.edge_adjacencies[idx]
+        transition = self.transition[idx]
+
+        # Ensure coalesced
+        edge_adj = edge_adj.coalesce()
+        transition = transition.coalesce()
+        label = self.labels[idx]
+
+        # Initialize lists for edge_index and edge_attr
+        edge_index = []
+        edge_attr = []
+
+        # Populate edge_index and edge_attr with additional features
+        for j in range(connectivity.shape[0]):
+            for k in range(connectivity.shape[0]):
+                if node_adj[j, k] == 0:
+                    continue
+                edge_index.append([j, k])
+                # Include additional edge attributes like isInter, isLeftIntra, etc.
+                edge_attr.append([
+                    connectivity[j, k], 
+                ])
+        
+        # Convert lists to tensors
+        edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+        edge_attr = torch.tensor(edge_attr, dtype=torch.float)
+        data = Data(
+            x=torch.eye(connectivity.shape[0], dtype=torch.float),
+            edge_index=edge_index,
+            edge_attr=edge_attr,
+            y=label.type(torch.long),
+            num_nodes=connectivity.shape[0],
+            node_adj=node_adj,
+            edge_adj=edge_adj,
+            transition=transition
+        )
+        
+        return data
+
+
 class BrainDataset(Dataset):
     def __init__(self, data):
         self.connectivities = data['connectivity']
@@ -40,6 +110,9 @@ class BrainDataset(Dataset):
     
     def num_classes(self):
         return len(self.unique_labels())
+    
+    def edge_attr_dim(self):
+        return 5
 
     def __len__(self):
         return len(self.connectivities)

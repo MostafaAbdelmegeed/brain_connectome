@@ -32,6 +32,7 @@ def parse_args():
     parser.add_argument('--augment_validation', action='store_true', help='Augment validation data')
     parser.add_argument('--span', type=float, default=0.02, help='Span for augmented data')
     parser.add_argument('--model', type=str, default='brain', help='Model name')
+    parser.add_argument('--vanilla', action='store_true', help='Use vanilla dataset')
     return parser.parse_args()
 
 

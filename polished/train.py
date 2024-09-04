@@ -8,7 +8,7 @@ from sklearn.metrics import f1_score, accuracy_score, precision_score, confusion
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.model_selection import StratifiedKFold, train_test_split, StratifiedShuffleSplit
 from torch_geometric.loader import DataLoader
-from dataset import BrainDataset
+from dataset import BrainDataset, VanillaDataset
 
 from torch.utils.data import TensorDataset, Subset
 
@@ -139,10 +139,15 @@ def train(model_name, device, args):
         processed_test_data = process(test_loader_for_process, device=device, percentile=args.percentile)
 
         # Directly use the augmented data for training
-        augmented_train_dataset = BrainDataset(augmented_train_data)
-        val_dataset = BrainDataset(processed_val_data)
-        test_dataset = BrainDataset(processed_test_data)
-
+        if args.vanilla:
+            augmented_train_dataset = VanillaDataset(augmented_train_data)
+            val_dataset = VanillaDataset(processed_val_data)
+            test_dataset = VanillaDataset(processed_test_data)
+        else:
+            augmented_train_dataset = BrainDataset(augmented_train_data)
+            val_dataset = BrainDataset(processed_val_data)
+            test_dataset = BrainDataset(processed_test_data)
+        edge_dim = augmented_train_dataset.edge_attr_dim()
         # Extract labels from each dataset
         train_labels = [data.y.item() for data in augmented_train_dataset]
         val_labels = [data.y.item() for data in val_dataset]
@@ -165,7 +170,7 @@ def train(model_name, device, args):
         test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, generator=generator)
         test_loader.collate_fn = collate_function
 
-        model = get_model(args).to(device)
+        model = get_model(args, edge_dim).to(device)
         optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-6, lr=learning_rate)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
 

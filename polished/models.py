@@ -4,7 +4,6 @@ import math
 import numpy as np
 from torch.nn import Module, Parameter, Dropout, LeakyReLU
 from torch_geometric.nn import MessagePassing, global_mean_pool, global_max_pool, GATv2Conv, BatchNorm, GCNConv, Linear, ResGatedGraphConv, Sequential, GINConv
-from torch_geometric.nn.models import GCN, GAT
 from encoding import yeo_network
 import torch.nn as nn
 import torch.nn.functional as F
@@ -209,11 +208,84 @@ class BrainNet(torch.nn.Module):
         # x, attn = self.attn_pool(x, data.batch)
         return x
     
+class GCNBlock(torch.nn.Module):
+    def __init__(self, in_features, out_features):
+        super(GCNBlock, self).__init__()
+        self.conv = GCNConv(in_features, out_features)
+        self.bn = BatchNorm(out_features)
+        self.relu = LeakyReLU()
+        
+    def forward(self, x, edge_index):
+        x = self.conv(x, edge_index)
+        x = self.bn(x)
+        x = self.relu(x)
+        return x
 
+class GCN(torch.nn.Module):
+    def __init__(self, hidden_channels, num_layers, out_channels, functional_groups=None, edge_dim=5, dropout=0.7):
+        super(GCN, self).__init__()
+        self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
+        self.layers = torch.nn.ModuleList()
+        for _ in range(num_layers):
+            self.layers.append(GCNBlock(hidden_channels, hidden_channels))
+        # self.gin = GINConv(Sequential('x', [(Linear(hidden_channels, hidden_channels), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_channels, hidden_channels), 'x -> x')]), train_eps=True)
+        # self.fc1 = Linear(hidden_channels, hidden_channels)
+        # self.attn_pool = AttentionPooling(hidden_channels, out_channels)
+        self.fc2 = Linear(hidden_channels, out_channels)
+
+    def forward(self, data):
+        x, edge_attr = self.encemb(data)
+        for _, layer in enumerate(self.layers):
+            x = layer(x, data.edge_index)
+        # x = self.gin(x, data.edge_index)
+        x = global_mean_pool(x, data.batch)
+        # x = F.leaky_relu(self.fc1(x))
+        x = self.fc2(x)
+        # x, attn = self.attn_pool(x, data.batch)
+        return x
+    
+class GATBlock(torch.nn.Module):
+    def __init__(self, in_features, out_features, heads=1, dropout=0.5, edge_dim=5):
+        super(GATBlock, self).__init__()
+        self.conv = GATv2Conv(in_features, out_features, heads=heads, dropout=dropout, edge_dim=edge_dim)
+        self.bn = BatchNorm(out_features*heads)
+        self.relu = LeakyReLU()
+        
+    def forward(self, x, edge_index, edge_attr):
+        x = self.conv(x, edge_index, edge_attr)
+        x = self.bn(x)
+        x = self.relu(x)
+        return x
+
+class GAT(torch.nn.Module):
+    def __init__(self, hidden_channels, num_layers, out_channels, functional_groups=None, heads=1, edge_dim=5, dropout=0.5):
+        super(GAT, self).__init__()
+        self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
+        self.layers = torch.nn.ModuleList()
+        for _ in range(num_layers):
+            if len(self.layers) == 0:
+                self.layers.append(GATBlock(hidden_channels, hidden_channels, heads=heads, dropout=dropout, edge_dim=edge_dim))
+            else:
+                self.layers.append(GATBlock(hidden_channels*heads, hidden_channels, heads=heads, dropout=dropout, edge_dim=edge_dim))
+        # self.gin = GINConv(Sequential('x', [(Linear(hidden_channels, hidden_channels), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_channels, hidden_channels), 'x -> x')]), train_eps=True)
+        # self.fc1 = Linear(hidden_channels, hidden_channels)
+        # self.attn_pool = AttentionPooling(hidden_channels, out_channels)
+        self.fc2 = Linear(hidden_channels*heads, out_channels)
+
+    def forward(self, data):
+        x, edge_attr = self.encemb(data)
+        for _, layer in enumerate(self.layers):
+            x = layer(x, data.edge_index, edge_attr)
+        # x = self.gin(x, data.edge_index)
+        x = global_mean_pool(x, data.batch)
+        # x = F.leaky_relu(self.fc1(x))
+        x = self.fc2(x)
+        # x, attn = self.attn_pool(x, data.batch)
+        return x
     
 
 
-def get_model(args):
+def get_model(args, edge_dim=5):
     model_name = args.model
     hidden_dim = args.hidden_dim
     n_layers = args.n_layers
@@ -223,10 +295,10 @@ def get_model(args):
     act = LeakyReLU()
     groups = yeo_network()
     if model_name == 'brain':
-        return BrainNet(hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, heads=heads, dropout=dropout, functional_groups=groups)
+        return BrainNet(hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, heads=heads, dropout=dropout, functional_groups=groups, edge_dim=edge_dim)
     elif model_name == 'gcn':
-        return GCN(in_channels=116, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, act=act, dropout=dropout)
+        return GCN(hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, functional_groups=groups, dropout=dropout, edge_dim=edge_dim)
     elif model_name == 'gat':
-        return GAT(in_channels=116, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, act=act, dropout=dropout)
+        return GAT(hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, functional_groups=groups, dropout=dropout, heads=heads, edge_dim=edge_dim)
     else:
         raise ValueError(f'Unknown model name: {model_name}')
