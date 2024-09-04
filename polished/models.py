@@ -194,7 +194,7 @@ class BrainNet(torch.nn.Module):
         # self.layers = torch.nn.ModuleList()
         # for _ in range(num_layers):
         #     self.layers.append(BrainBlock(hidden_channels, hidden_channels, edge_dim, heads=heads, dropout=dropout))
-        # self.gin = GINConv(Sequential('x', [(Linear(hidden_channels, hidden_channels), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_channels, hidden_channels), 'x -> x')]), train_eps=True)
+        self.gin = GINConv(Sequential('x', [(Linear(hidden_channels, hidden_channels), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_channels, hidden_channels), 'x -> x')]), train_eps=True)
         # self.fc1 = Linear(hidden_channels, hidden_channels)
         self.attn_pool = AttentionPooling(hidden_channels, out_channels)
         # self.fc2 = Linear(hidden_channels, out_channels)
