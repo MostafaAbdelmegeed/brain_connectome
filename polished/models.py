@@ -207,7 +207,7 @@ class BrainNet(torch.nn.Module):
         # x = global_mean_pool(x, data.batch)
         # x = F.leaky_relu(self.fc1(x))
         # x = self.fc2(x)
-        x = self.attn_pool(x, data.batch)
+        x, attn = self.attn_pool(x, data.batch)
         return x
     
 
