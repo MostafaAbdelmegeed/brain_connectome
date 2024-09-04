@@ -190,20 +190,20 @@ class BrainNet(torch.nn.Module):
     def __init__(self, hidden_channels, num_layers, out_channels, functional_groups=None, edge_dim=5, heads=1, dropout=0.7):
         super(BrainNet, self).__init__()
         self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
-        self.layers = torch.nn.ModuleList()
-        for _ in range(num_layers):
-            self.layers.append(BrainBlock(hidden_channels, hidden_channels, edge_dim, heads=heads, dropout=dropout))
-        self.gin = GINConv(Sequential('x', [(Linear(hidden_channels, hidden_channels), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_channels, hidden_channels), 'x -> x')]), train_eps=True)
-        self.fc1 = Linear(hidden_channels, hidden_channels)
+        # self.layers = torch.nn.ModuleList()
+        # for _ in range(num_layers):
+        #     self.layers.append(BrainBlock(hidden_channels, hidden_channels, edge_dim, heads=heads, dropout=dropout))
+        # self.gin = GINConv(Sequential('x', [(Linear(hidden_channels, hidden_channels), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_channels, hidden_channels), 'x -> x')]), train_eps=True)
+        # self.fc1 = Linear(hidden_channels, hidden_channels)
         self.fc2 = Linear(hidden_channels, out_channels)
 
     def forward(self, data):
         x, edge_attr = self.encemb(data)
-        for _, layer in enumerate(self.layers):
-            x = layer(x, data.edge_index, edge_attr)
-        x = self.gin(x, data.edge_index)
+        # for _, layer in enumerate(self.layers):
+        #     x = layer(x, data.edge_index, edge_attr)
+        # x = self.gin(x, data.edge_index)
         x = global_mean_pool(x, data.batch)
-        x = F.leaky_relu(self.fc1(x))
+        # x = F.leaky_relu(self.fc1(x))
         x = self.fc2(x)
         return x
     
