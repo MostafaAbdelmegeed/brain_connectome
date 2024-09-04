@@ -19,7 +19,7 @@ class BrainEncodeEmbed(MessagePassing):
         self.num_nodes = n_roi
         self.encoding = self.create_encoding()
         self.linear = Linear(n_roi+self.n_groups, hidden_dim)
-        self.coembed_1 = AlternateConvolution(in_features_v=self.hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=False)
+        self.coembed_1 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=False)
         self.coembed_2 = AlternateConvolution(in_features_v=self.hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=True)
 
     @property
@@ -177,6 +177,7 @@ class BrainBlock(Module):
         self.bn = BatchNorm(out_features)
         self.dropout = Dropout(p=dropout)
         self.relu = LeakyReLU()
+        
 
     def forward(self, x, edge_index, edge_attr):
         x = self.gat(x, edge_index, edge_attr)
@@ -195,6 +196,7 @@ class BrainNet(torch.nn.Module):
         #     self.layers.append(BrainBlock(hidden_channels, hidden_channels, edge_dim, heads=heads, dropout=dropout))
         # self.gin = GINConv(Sequential('x', [(Linear(hidden_channels, hidden_channels), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_channels, hidden_channels), 'x -> x')]), train_eps=True)
         # self.fc1 = Linear(hidden_channels, hidden_channels)
+        self.attn_pool = AttentionPooling(hidden_channels, out_features)
         self.fc2 = Linear(hidden_channels, out_channels)
 
     def forward(self, data):
