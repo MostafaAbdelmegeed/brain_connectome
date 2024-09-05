@@ -208,16 +208,18 @@ class BrainNet(torch.nn.Module):
         return x
     
 class GCNBlock(torch.nn.Module):
-    def __init__(self, in_features, out_features):
+    def __init__(self, in_features, out_features, dropout=0.7):
         super(GCNBlock, self).__init__()
         self.conv = GCNConv(in_features, out_features)
         self.bn = BatchNorm(out_features)
         self.relu = LeakyReLU()
+        self.dropout = Dropout(p=dropout)
         
     def forward(self, x, edge_index):
         x = self.conv(x, edge_index)
         x = self.bn(x)
         x = self.relu(x)
+        x = self.dropout(x)
         return x
 
 class GCN(torch.nn.Module):
@@ -226,7 +228,7 @@ class GCN(torch.nn.Module):
         self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
         self.layers = torch.nn.ModuleList()
         for _ in range(num_layers):
-            self.layers.append(GCNBlock(hidden_channels, hidden_channels))
+            self.layers.append(GCNBlock(hidden_channels, hidden_channels, dropout=dropout))
         # self.gin = GINConv(Sequential('x', [(Linear(hidden_channels, hidden_channels), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_channels, hidden_channels), 'x -> x')]), train_eps=True)
         # self.fc1 = Linear(hidden_channels, hidden_channels)
         # self.attn_pool = AttentionPooling(hidden_channels, out_channels)
