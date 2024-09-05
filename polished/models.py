@@ -168,19 +168,18 @@ class AttentionPooling(nn.Module):
         return x, weights
 
 class BrainBlock(Module):
-    def __init__(self, in_features, out_features, edge_dim, heads=1, dropout=0.7):
+    def __init__(self, in_features, out_features, edge_dim, dropout=0.7):
         super(BrainBlock, self).__init__()
-        self.gat = GATv2Conv(in_features, out_features, heads=heads, dropout=dropout, edge_dim=edge_dim)
-        self.res = ResGatedGraphConv(out_features*heads, out_features, edge_dim=edge_dim)
+        self.conv = GCNConv(in_features, out_features)
+        self.res = ResGatedGraphConv(out_features, out_features, edge_dim=edge_dim)
         self.bn = BatchNorm(out_features)
         self.dropout = Dropout(p=dropout)
         self.relu = LeakyReLU()
         
-
     def forward(self, x, edge_index, edge_attr):
-        x = self.gat(x, edge_index, edge_attr)
-        x = self.res(x, edge_index, edge_attr)
+        x = self.conv(x, edge_index)
         x = self.relu(x)
+        x = self.res(x, edge_index, edge_attr)
         x = self.bn(x)
         x = self.dropout(x)
         return x
@@ -191,7 +190,7 @@ class BrainNet(torch.nn.Module):
         self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
         self.layers = torch.nn.ModuleList()
         for _ in range(num_layers):
-            self.layers.append(BrainBlock(hidden_channels, hidden_channels, edge_dim, heads=heads, dropout=dropout))
+            self.layers.append(BrainBlock(hidden_channels, hidden_channels, edge_dim, dropout=dropout))
         # self.gin = GINConv(Sequential('x', [(Linear(hidden_channels, hidden_channels), 'x -> x'), LeakyReLU(inplace=True), (Linear(hidden_channels, hidden_channels), 'x -> x')]), train_eps=True)
         # self.fc1 = Linear(hidden_channels, hidden_channels)
         # self.attn_pool = AttentionPooling(hidden_channels, out_channels)
