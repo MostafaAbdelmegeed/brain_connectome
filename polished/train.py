@@ -98,7 +98,7 @@ def train(model_name, device, args):
     # Get the current timestamp
     timestamp = datetime.datetime.now().strftime("%m-%d-%H-%M-%S")
     # TensorBoard writer
-    writer = SummaryWriter(log_dir=f'polished/runs/{model_name}_{args.dataset}_s{seed}_f{n_folds}_e{epochs}_bs{batch_size}_lr{learning_rate}_hd{hidden_dim}_d{dropout}_h{heads}_l{n_layers}_a{args.augmented}_{timestamp}')
+    writer = SummaryWriter(log_dir=f'polished/runs/{model_name}_{args.exp_code}_{args.dataset}_s{seed}_f{n_folds}_e{epochs}_bs{batch_size}_lr{learning_rate}_hd{hidden_dim}_d{dropout}_h{heads}_l{n_layers}_a{args.augmented}_{timestamp}')
     writer.add_text('Arguments', str(args))
 
     generator = torch.Generator().manual_seed(seed)
