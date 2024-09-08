@@ -209,7 +209,8 @@ class BrainBlock(Module):
             torch.nn.init.zeros_(self.conv.lin.bias)  # Initialize bias to zero if it exists
         
     def forward(self, x, edge_index, edge_attr):
-        x = self.conv(x, edge_index)
+        edge_weight = torch.abs(edge_attr[:, 0])
+        x = self.conv(x, edge_index, edge_weight)
         x = self.relu(x)
         x = self.ln(x)
         x = self.dropout(x)
@@ -225,14 +226,17 @@ class BrainNet(torch.nn.Module):
                 self.layers.append(BrainBlock(in_channels, hidden_channels, edge_dim=edge_dim, dropout=dropout))
             else:
                 self.layers.append(BrainBlock(hidden_channels, hidden_channels, edge_dim=edge_dim, dropout=dropout))
-        self.fc2 = Linear(hidden_channels, out_channels)
+        self.lin1 = Linear(hidden_channels, in_channels)
+        self.lin2 = Linear(in_channels, out_channels)
         self.reset_parameters()
     
     def reset_parameters(self):
         for layer in self.layers:
             layer.reset_parameters()  # Reset parameters for each BrainBlock
-        torch.nn.init.xavier_uniform_(self.fc2.weight)  # Apply Xavier initialization to Linear layer
-        torch.nn.init.zeros_(self.fc2.bias)  # Initialize bias to zero
+        torch.nn.init.xavier_uniform_(self.lin1.weight)  # Apply Xavier initialization to Linear layer
+        torch.nn.init.zeros_(self.lin1.bias)  # Initialize bias to zero
+        torch.nn.init.xavier_uniform_(self.lin2.weight)  # Apply Xavier initialization to Linear layer
+        torch.nn.init.zeros_(self.lin2.bias)  # Initialize bias to zero
 
     def forward(self, data):
         x, edge_attr = self.encemb(data)
@@ -240,38 +244,47 @@ class BrainNet(torch.nn.Module):
         for _, layer in enumerate(self.layers):
             x = layer(x, data.edge_index, edge_attr)
         x = global_mean_pool(x, data.batch)
-        x = self.fc2(x)
+        x = self.lin1(F.leaky_relu(x))
+        x = self.lin2(x)
         return x
     
 class GCNBlock(torch.nn.Module):
     def __init__(self, in_features, out_features, dropout=0.7):
         super(GCNBlock, self).__init__()
         self.conv = GCNConv(in_features, out_features)
-        self.ln = LayerNorm(out_features)
         self.relu = LeakyReLU()
+        self.ln = LayerNorm(out_features)
         self.dropout = Dropout(p=dropout)
         
-    def forward(self, x, edge_index):
-        x = self.conv(x, edge_index)
-        x = self.ln(x)
+    def forward(self, x, edge_index, edge_weight):
+        edge_weight = (edge_weight + 1) / 2  # Normalize from [-1, 1] to [0, 1]
+        x = self.conv(x, edge_index, edge_weight)
         x = self.relu(x)
+        x = self.ln(x)
         x = self.dropout(x)
         return x
 
 class GCN(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, num_layers, out_channels, dropout=0.7):
         super(GCN, self).__init__()
-        self.layers = torch.nn.ModuleList()
-        for _ in range(num_layers):
-            self.layers.append(GCNBlock(in_channels, hidden_channels, dropout=dropout))
-        self.fc2 = Linear(hidden_channels, out_channels)
+        self.conv1 = GCNConv(in_channels, hidden_channels)
+        self.conv2 = GCNConv(hidden_channels, hidden_channels)
+        self.lin1 = Linear(hidden_channels, in_channels)
+        self.lin2 = Linear(in_channels, out_channels)
+        self.dropout = dropout
 
     def forward(self, data):
-        x = data.x
-        for _, layer in enumerate(self.layers):
-            x = layer(x, data.edge_index)
-        x = global_mean_pool(x, data.batch)
-        x = self.fc2(x)
+        x, edge_index, edge_weight = data.x, data.edge_index, data.edge_attr[:, 0]
+        edge_weight = torch.abs(edge_weight)
+        x = self.conv1(x, edge_index, edge_weight)
+        x = F.relu(x)
+        x = self.conv2(x.float(), edge_index, edge_weight)
+        x = F.relu(x)
+        x = global_mean_pool(x, data.batch) 
+        x = F.dropout(x, p=self.dropout, training=self.training)
+        x_fea = self.lin1(x)
+        x = F.relu(x_fea)
+        x = self.lin2(x)
         return x
     
 class GATBlock(torch.nn.Module):

@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument('--model', type=str, default='brain', help='Model name')
     parser.add_argument('--vanilla', action='store_true', help='Use vanilla dataset')
     parser.add_argument('--exp_code', type=str, default='-', help='Experiment code')
+    parser.add_argument('--run_name', type=str, default='', help='Run name')
     return parser.parse_args()
 
 
@@ -49,7 +50,7 @@ def main():
         device = torch.device('cuda:{}'.format(args.gpu_id))
         # torch.set_default_device(device)
     torch.autograd.set_detect_anomaly(True)
-    train(args.model, device, args)
+    train(args, device)
 
 if __name__ == "__main__":
     main()

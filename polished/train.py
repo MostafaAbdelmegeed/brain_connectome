@@ -67,8 +67,9 @@ def plot_to_image(figure):
     
     return image
 
-def train(model_name, device, args):
+def train(args, device):
     # Hyperparameters
+    model_name = args.model
     n_folds = args.n_folds
     seed = args.seed
     epochs = args.epochs
@@ -98,7 +99,8 @@ def train(model_name, device, args):
     # Get the current timestamp
     timestamp = datetime.datetime.now().strftime("%m-%d-%H-%M-%S")
     # TensorBoard writer
-    writer = SummaryWriter(log_dir=f'polished/runs/{model_name}_{args.exp_code}_{args.dataset}_s{seed}_f{n_folds}_e{epochs}_bs{batch_size}_lr{learning_rate}_hd{hidden_dim}_d{dropout}_h{heads}_l{n_layers}_a{args.augmented}_{timestamp}')
+    run_name = args.run_name if args.run_name else f'{model_name}_{args.exp_code}_{args.dataset}_s{seed}_f{n_folds}_e{epochs}_bs{batch_size}_lr{learning_rate}_hd{hidden_dim}_d{dropout}_h{heads}_l{n_layers}_a{args.augmented}_{timestamp}'
+    writer = SummaryWriter(log_dir=f'polished/runs/{run_name}')
     writer.add_text('Arguments', str(args))
 
     generator = torch.Generator().manual_seed(seed)
@@ -171,7 +173,7 @@ def train(model_name, device, args):
         test_loader.collate_fn = collate_function
 
         model = get_model(args, edge_dim).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-7, lr=learning_rate)
+        optimizer = torch.optim.Adam(model.parameters(), weight_decay=0.0005, lr=learning_rate)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
 
         # Class weights
