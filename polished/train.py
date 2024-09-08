@@ -171,15 +171,15 @@ def train(model_name, device, args):
         test_loader.collate_fn = collate_function
 
         model = get_model(args, edge_dim).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-6, lr=learning_rate)
+        optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-7, lr=learning_rate)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
 
-        # # Class weights
-        # class_weights = compute_class_weight('balanced', classes=np.unique(dataset.labels.to('cpu').numpy()), y=dataset.labels.to('cpu').numpy())
-        # class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
-        # print_with_timestamp(f'Class weights: {class_weights}')
+        # Class weights
+        class_weights = compute_class_weight('balanced', classes=np.unique(train_labels), y=train_labels)
+        class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
+        print_with_timestamp(f'Class weights: {class_weights}')
         print_with_timestamp(f"Epoch/Loss\t||\tTraining\t|\tValidation\t")
-        criterion = torch.nn.CrossEntropyLoss().to(device)
+        criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(device)
 
         best_val_loss = float('inf')
         patience_counter = 0
@@ -230,9 +230,17 @@ def train(model_name, device, args):
                     val_labels.extend(data.y.cpu().numpy())
 
             val_loss /= len(val_loader)
-            writer.add_scalar(f'Fold_{fold+1}/Metrics/Val_Loss', val_loss, epoch)
+            val_accuracy = val_correct / val_total
+            # Compute additional metrics using scikit-learn
+            val_f1 = f1_score(val_labels, val_preds, average='weighted', zero_division=0)  # weighted for class imbalance
+            val_precision = precision_score(val_labels, val_preds, average='weighted', zero_division=0)
 
-            print_with_timestamp(f"{epoch + 1}/{epochs}\t\t||\t{train_loss:.4f}\t\t|\t{val_loss:.4f}\t")
+            writer.add_scalar(f'Fold_{fold+1}/Metrics/Val_Loss', val_loss, epoch)
+            writer.add_scalar(f'Fold_{fold+1}/Metrics/Val_Accuracy', val_accuracy, epoch)
+            writer.add_scalar(f'Fold_{fold+1}/Metrics/Val_F1', val_f1, epoch)
+            writer.add_scalar(f'Fold_{fold+1}/Metrics/Val_Precision', val_precision, epoch)
+
+            print_with_timestamp(f"Epoch {epoch + 1}/{epochs}\t||\tTrain Loss: {train_loss:.4f}\t|\tVal Loss: {val_loss:.4f}\t|\tAccuracy: {val_accuracy:.4f}\t|\tF1-Score: {val_f1:.4f}")
 
             # Early stopping check
             if val_loss < best_val_loss:
