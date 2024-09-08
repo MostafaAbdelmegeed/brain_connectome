@@ -184,6 +184,9 @@ def train(args, device):
         criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(device)
 
         best_val_loss = float('inf')
+        best_val_acc = 0
+        best_val_f1 = 0
+        best_val_precision = 0
         patience_counter = 0
 
         for epoch in range(epochs):
@@ -244,16 +247,21 @@ def train(args, device):
 
             print_with_timestamp(f"Epoch {epoch + 1}/{epochs}\t||\tTrain Loss: {train_loss:.4f}\t|\tVal Loss: {val_loss:.4f}\t|\tAccuracy: {val_accuracy:.4f}\t|\tF1-Score: {val_f1:.4f}")
 
-            # Early stopping check
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 patience_counter = 0
-                best_model_state = model.state_dict()
             else:
                 patience_counter += 1
                 if patience_counter >= patience:
                     print_with_timestamp(f"Early stopping at epoch {epoch + 1}")
                     break
+            # Early stopping check
+            if val_accuracy > best_val_acc:
+                best_val_acc = val_accuracy
+                best_val_f1 = val_f1
+                best_val_precision = val_precision
+                best_model_state = model.state_dict()
+            
         # Step the scheduler after each epoch
         scheduler.step(metrics=val_loss)
         # Load the best model state
@@ -284,12 +292,13 @@ def train(args, device):
         writer.add_scalar(f'Fold_{fold+1}/Test_Accuracy', acc, epoch)
         writer.add_scalar(f'Fold_{fold+1}/Test_Precision', precision, epoch)
         writer.add_scalar(f'Fold_{fold+1}/Test_F1', f1, epoch)
-        print_with_timestamp(f"Fold {fold + 1} Metrics: Accuracy: {acc:.4f}, Precision: {precision:.4f}, F1 Score: {f1:.4f}")
+        print_with_timestamp(f"Fold {fold +1} Best Metrics: Accuracy: {best_val_acc:.4f}, Precision: {best_val_precision:.4f}, F1 Score: {best_val_f1:.4f}")
+        print_with_timestamp(f"Fold {fold + 1} Test Metrics: Accuracy: {acc:.4f}, Precision: {precision:.4f}, F1 Score: {f1:.4f}")
 
         # Store metrics for the current fold
-        all_fold_metrics['accuracy'].append(acc)
-        all_fold_metrics['precision'].append(precision)
-        all_fold_metrics['f1'].append(f1)
+        all_fold_metrics['accuracy'].append(best_val_acc)
+        all_fold_metrics['precision'].append(best_val_precision)
+        all_fold_metrics['f1'].append(best_val_f1)
         all_fold_metrics['conf_matrix'].append(conf_matrix)
 
         # Print average metrics until the latest fold
