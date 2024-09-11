@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 
 class BrainEncodeEmbed(MessagePassing):
-    def __init__(self, functional_groups, hidden_dim, edge_dim, n_roi=116, embedding_dim=16):
+    def __init__(self, functional_groups, hidden_dim, edge_dim, n_roi=116, embedding_dim=16, dropout=0.7):
         super(BrainEncodeEmbed, self).__init__()
         self.functional_groups = functional_groups
         self.n_groups = len(functional_groups)
@@ -24,10 +24,11 @@ class BrainEncodeEmbed(MessagePassing):
         # Linear layer for combining node features and group embeddings
         self.linear = Linear(n_roi + self.embedding_dim, hidden_dim)
         self.relu = LeakyReLU()
+        self.dropout = Dropout(p=dropout)  # Adding dropout here
         
         # Other layers remain the same
         # self.coembed_1 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=False)
-        self.coembed_2 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=True)
+        self.coembed_2 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=True, dropout=dropout)
 
     @property
     def device(self):
@@ -76,6 +77,7 @@ class BrainEncodeEmbed(MessagePassing):
         if x is not None:
             x = torch.cat([x, expanded_encoding], dim=-1)
         
+        x = self.dropout(x)
         # Pass the concatenated features through a linear layer
         x = self.relu(self.linear(x))
         
@@ -90,12 +92,13 @@ class BrainEncodeEmbed(MessagePassing):
         return x, edge_attr
 
 class AlternateConvolution(Module):
-    def __init__(self, in_features_v, out_features_v, in_features_e, out_features_e, bias=True, node_layer=True):
+    def __init__(self, in_features_v, out_features_v, in_features_e, out_features_e, bias=True, node_layer=True, dropout=0.7):
         super(AlternateConvolution, self).__init__()
         self.in_features_e = in_features_e
         self.out_features_e = out_features_e
         self.in_features_v = in_features_v
         self.out_features_v = out_features_v
+        self.dropout = Dropout(p=dropout)  # Adding dropout here
         if node_layer:
             self.node_layer = True
             self.weight = Parameter(torch.FloatTensor(in_features_v, out_features_v))
@@ -156,6 +159,8 @@ class AlternateConvolution(Module):
             normalized_adjusted_A = adjusted_A / (adjusted_A.max(2, keepdim=True)[0] + 1e-10)
             weight_repeated = self.weight.unsqueeze(0).repeat(batch_size, 1, 1)
             output = torch.bmm(normalized_adjusted_A, torch.bmm(H_e, weight_repeated))
+            # Apply dropout after the edge layer processing
+            output = self.dropout(output)
             if self.bias is not None:
                 output += self.bias
             return H_v, output
@@ -219,7 +224,7 @@ class BrainBlock(Module):
 class BrainNet(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, num_layers, out_channels, functional_groups=None, edge_dim=5, heads=1, dropout=0.7):
         super(BrainNet, self).__init__()
-        self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
+        self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116, dropout=dropout)
         self.layers = torch.nn.ModuleList()
         for _ in range(num_layers):
             if len(self.layers) == 0:
