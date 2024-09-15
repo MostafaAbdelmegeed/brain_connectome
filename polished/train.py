@@ -161,9 +161,9 @@ def train(args, device):
         test_label_distribution = np.bincount(test_labels)
 
         # Print label distributions
-        print("Training labels distribution:", train_label_distribution)
-        print("Validation labels distribution:", val_label_distribution)
-        print("Test labels distribution:", test_label_distribution)
+        print_with_timestamp(f"Training labels distribution: {train_label_distribution}")
+        print_with_timestamp(f"Validation labels distribution: {val_label_distribution}")
+        print_with_timestamp(f"Test labels distribution: {test_label_distribution}")
 
         train_loader = DataLoader(augmented_train_dataset, batch_size=batch_size, shuffle=True, generator=generator)
         train_loader.collate_fn = collate_function
@@ -173,12 +173,14 @@ def train(args, device):
         test_loader.collate_fn = collate_function
 
         model = get_model(args, edge_dim).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), weight_decay=0.0005, lr=learning_rate)
+        optimizer = torch.optim.Adam(model.parameters(), weight_decay=0.00005, lr=learning_rate)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
 
         # Class weights
         class_weights = compute_class_weight('balanced', classes=np.unique(train_labels), y=train_labels)
         class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
+        class_weights[0] = class_weights[0] *2      # Adjust the weight for the first class
+        class_weights[3] = class_weights[3] *1.5  # Adjust the weight for the first class
         print_with_timestamp(f'Class weights: {class_weights}')
         print_with_timestamp(f"Epoch/Loss\t||\tTraining\t|\tValidation\t")
         criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(device)
@@ -210,6 +212,7 @@ def train(args, device):
                 total_predictions += data.y.size(0)
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(data.y.cpu().numpy())
+        
 
             train_loss /= len(train_loader)
             writer.add_scalar(f'Fold_{fold+1}/Metrics/Train_Loss', train_loss, epoch)
@@ -261,6 +264,13 @@ def train(args, device):
                 best_val_f1 = val_f1
                 best_val_precision = val_precision
                 best_model_state = model.state_dict()
+            
+            # for name, param in model.named_parameters():
+            #     if param.grad is not None:
+            #         print_with_timestamp(f"{name} has gradient")
+            #     else:
+            #         print_with_timestamp(f"{name} has **no** gradient")
+
             
         # Step the scheduler after each epoch
         scheduler.step(metrics=val_loss)
