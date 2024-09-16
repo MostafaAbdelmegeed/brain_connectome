@@ -450,7 +450,7 @@ class BrainNetGCN(torch.nn.Module):
         # self.bn_edge = BatchNorm(edge_dim)
         self.layers = torch.nn.ModuleList()
         for _ in range(num_layers):
-            self.layers.append(GCNConv(hidden_channels, hidden_channels))
+            self.layers.append(GCNConv(hidden_channels, hidden_channels, add_self_loops=True))
         self.lin1 = Linear(hidden_channels, in_channels)
         self.lin2 = Linear(in_channels, out_channels)
         self.edge_weight_transform = Linear(edge_dim, 1)  # Learnable transformation from 5D to 1D
@@ -463,9 +463,13 @@ class BrainNetGCN(torch.nn.Module):
         # edge_weight = torch.abs(edge_attr[:, 0])
         # Learnable weighted sum for edge attributes
         edge_weight = F.relu(self.edge_weight_transform(edge_attr).squeeze())
+        print_with_timestamp(f'edge weights min: {edge_weight.min()}, max: {edge_weight.max()}')
         edge_index = data.edge_index
         for layer in self.layers:
+            print_with_timestamp(f'x min: {x.min()}, max: {x.max()}')
+            print_with_timestamp(f'edge weight min: {edge_weight.min()}, max: {edge_weight.max()}')
             x = layer(x, edge_index, edge_weight)
+            print_with_timestamp(f'x min: {x.min()}, max: {x.max()}')
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
         x = global_mean_pool(x, data.batch) 
