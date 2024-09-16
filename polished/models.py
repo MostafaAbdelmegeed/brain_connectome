@@ -2,7 +2,7 @@
 import torch
 import math
 import numpy as np
-from torch.nn import Module, Parameter, Dropout, LeakyReLU, Sequential
+from torch.nn import Module, Parameter, Dropout, LeakyReLU, Sequential, ReLU
 from torch_geometric.nn import MessagePassing, global_mean_pool, global_add_pool, GATv2Conv, BatchNorm, LayerNorm, GCNConv, Linear, ResGatedGraphConv, GINConv, GINEConv
 from torch_geometric.nn import MLP as pyg_MLP
 from encoding import yeo_network
@@ -15,87 +15,87 @@ def print_with_timestamp(message):
     timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     print(f"{timestamp}\t{message}")
 
-class OGBrainEncodeEmbed(MessagePassing):
-    def __init__(self, functional_groups, hidden_dim, edge_dim, n_roi=116, embedding_dim=16, dropout=0.7):
-        super(OGBrainEncodeEmbed, self).__init__()
-        self.functional_groups = functional_groups
-        self.n_groups = len(functional_groups)
-        self.hidden_dim = hidden_dim
-        self.num_nodes = n_roi
-        self.embedding_dim = embedding_dim
+# class OGBrainEncodeEmbed(MessagePassing):
+#     def __init__(self, functional_groups, hidden_dim, edge_dim, n_roi=116, embedding_dim=16, dropout=0.7):
+#         super(OGBrainEncodeEmbed, self).__init__()
+#         self.functional_groups = functional_groups
+#         self.n_groups = len(functional_groups)
+#         self.hidden_dim = hidden_dim
+#         self.num_nodes = n_roi
+#         self.embedding_dim = embedding_dim
         
-        # Define a learnable embedding layer
-        self.group_embedding = nn.Embedding(self.n_groups, self.embedding_dim)
+#         # Define a learnable embedding layer
+#         self.group_embedding = nn.Embedding(self.n_groups, self.embedding_dim)
         
-        # Linear layer for combining node features and group embeddings
-        self.linear = Linear(n_roi + self.embedding_dim, hidden_dim)
-        self.relu = LeakyReLU()
-        self.dropout = Dropout(p=dropout)  # Adding dropout here
+#         # Linear layer for combining node features and group embeddings
+#         self.linear = Linear(n_roi + self.embedding_dim, hidden_dim)
+#         self.relu = LeakyReLU()
+#         self.dropout = Dropout(p=dropout)  # Adding dropout here
         
-        # Other layers remain the same
-        self.coembed_1 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=False, dropout=dropout)
-        self.coembed_2 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=True, dropout=dropout)
+#         # Other layers remain the same
+#         self.coembed_1 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=False, dropout=dropout)
+#         self.coembed_2 = AlternateConvolution(in_features_v=hidden_dim, out_features_v=hidden_dim, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=True, dropout=dropout)
 
-    @property
-    def device(self):
-        return next(self.parameters()).device
+#     @property
+#     def device(self):
+#         return next(self.parameters()).device
 
-    def create_encoding(self):
-        encoding = torch.zeros((self.num_nodes, self.embedding_dim), device=self.device)  # Initialize encoding for nodes
+#     def create_encoding(self):
+#         encoding = torch.zeros((self.num_nodes, self.embedding_dim), device=self.device)  # Initialize encoding for nodes
 
-        # Loop through the functional groups and assign the embeddings
-        for group_id, nodes in enumerate(self.functional_groups.values()):
-            # Fetch the learnable embedding for the current group
-            group_embedding = self.group_embedding(torch.tensor(group_id, device=self.device))
+#         # Loop through the functional groups and assign the embeddings
+#         for group_id, nodes in enumerate(self.functional_groups.values()):
+#             # Fetch the learnable embedding for the current group
+#             group_embedding = self.group_embedding(torch.tensor(group_id, device=self.device))
             
-            # Assign the same embedding to all nodes in the group
-            for node in nodes:
-                encoding[node] = group_embedding
+#             # Assign the same embedding to all nodes in the group
+#             for node in nodes:
+#                 encoding[node] = group_embedding
                 
-        return encoding
+#         return encoding
 
 
-    def get_group_encoding(self, group):
-        encoding = torch.zeros(self.n_groups)
-        encoding[hash(group) % self.n_groups] = 1
-        return encoding
+#     def get_group_encoding(self, group):
+#         encoding = torch.zeros(self.n_groups)
+#         encoding[hash(group) % self.n_groups] = 1
+#         return encoding
 
-    def reset_parameters(self):
-        nn.init.xavier_uniform_(self.group_embedding.weight)  # Use Xavier initialization for embeddings
+#     def reset_parameters(self):
+#         nn.init.xavier_uniform_(self.group_embedding.weight)  # Use Xavier initialization for embeddings
 
-    def forward(self, data):
-        x = data.x
-        edge_attr = data.edge_attr
-        n_adj = data.node_adj
-        e_adj = data.edge_adj
-        transition = data.transition
+#     def forward(self, data):
+#         x = data.x
+#         edge_attr = data.edge_attr
+#         n_adj = data.node_adj
+#         e_adj = data.edge_adj
+#         transition = data.transition
 
-        batch_size = data.num_graphs
-        num_nodes = x.size(0)
+#         batch_size = data.num_graphs
+#         num_nodes = x.size(0)
 
-        # Create an expanded embedding for each node based on its functional group
-        expanded_encoding = torch.zeros((num_nodes, self.embedding_dim), device=x.device)
-        for group_id, nodes in enumerate(self.functional_groups.values()):
-            group_embedding = self.group_embedding(torch.tensor(group_id, device=x.device))
-            expanded_encoding[nodes] = group_embedding
+#         # Create an expanded embedding for each node based on its functional group
+#         expanded_encoding = torch.zeros((num_nodes, self.embedding_dim), device=x.device)
+#         for group_id, nodes in enumerate(self.functional_groups.values()):
+#             group_embedding = self.group_embedding(torch.tensor(group_id, device=x.device))
+#             expanded_encoding[nodes] = group_embedding
 
-        # Concatenate node features with functional group embeddings
-        if x is not None:
-            x = torch.cat([x, expanded_encoding], dim=-1)
+#         # Concatenate node features with functional group embeddings
+#         if x is not None:
+#             x = torch.cat([x, expanded_encoding], dim=-1)
         
-        x = self.dropout(x)
-        # Pass the concatenated features through a linear layer
-        x = self.relu(self.linear(x))
+#         x = self.dropout(x)
+#         # Pass the concatenated features through a linear layer
+#         x = self.relu(self.linear(x))
         
-        # Perform co-embedding operations
-        x, edge_attr = self.coembed_1(x, edge_attr, e_adj, n_adj, transition)
-        x = x.reshape(data.num_nodes, -1, x.size(2)).squeeze(1)
-        edge_attr = edge_attr.reshape(data.num_edges, -1, edge_attr.size(2)).squeeze(1)
-        x, edge_attr = self.coembed_2(x, edge_attr, e_adj, n_adj, transition)
-        x = x.reshape(data.num_nodes, -1, x.size(2)).squeeze(1)
-        edge_attr = edge_attr.reshape(data.num_edges, -1, edge_attr.size(2)).squeeze(1)
+#         # Perform co-embedding operations
+#         x, edge_attr = self.coembed_1(x, edge_attr, e_adj, n_adj, transition)
+#         x = x.reshape(data.num_nodes, -1, x.size(2)).squeeze(1)
+#         edge_attr = edge_attr.reshape(data.num_edges, -1, edge_attr.size(2)).squeeze(1)
+#         x, edge_attr = self.coembed_2(x, edge_attr, e_adj, n_adj, transition)
+#         x = x.reshape(data.num_nodes, -1, x.size(2)).squeeze(1)
+#         edge_attr = edge_attr.reshape(data.num_edges, -1, edge_attr.size(2)).squeeze(1)
 
-        return x, edge_attr
+#         return x, edge_attr
 
 class BrainEncodeEmbed(torch.nn.Module):
     def __init__(self, functional_groups, hidden_dim, edge_dim, n_roi=116, embedding_dim=16, dropout=0.7):
@@ -106,35 +106,24 @@ class BrainEncodeEmbed(torch.nn.Module):
         self.num_nodes = n_roi
         self.embedding_dim = embedding_dim
         self.dropout_rate = dropout
-
         # Define a learnable embedding layer for functional groups
         self.group_embedding = torch.nn.Embedding(self.n_groups, self.embedding_dim)
-
         # MLP for GINEConv (node feature transformation)
         self.mlp = Sequential(
             Linear(hidden_dim, hidden_dim),
-            LeakyReLU(),
+            ReLU(),
             Linear(hidden_dim, hidden_dim)
         )
-
         # GINEConv layer
-        self.conv = GINEConv(nn=self.mlp)
-
-        # Edge encoder to map edge features to the same dimensionality as node features
-        self.edge_encoder = Linear(edge_dim, hidden_dim)
-
-        self.relu = LeakyReLU()
+        self.conv = GINEConv(nn=self.mlp, edge_dim=edge_dim)
+        self.relu = ReLU()
         self.dropout = Dropout(p=self.dropout_rate)
         self.bn = BatchNorm(hidden_dim)
-
         self.reset_parameters()
 
     def reset_parameters(self):
         # Initialize group embeddings
         torch.nn.init.xavier_uniform_(self.group_embedding.weight)
-        # Initialize edge encoder
-        torch.nn.init.xavier_uniform_(self.edge_encoder.weight)
-        torch.nn.init.zeros_(self.edge_encoder.bias)
         # Initialize MLP layers in GINEConv
         for layer in self.mlp:
             if isinstance(layer, Linear):
@@ -148,33 +137,24 @@ class BrainEncodeEmbed(torch.nn.Module):
         x = data.x  # Node features [N, in_channels]
         edge_index = data.edge_index  # Edge indices [2, E]
         edge_attr = data.edge_attr  # Edge features [E, edge_dim]
-
         num_nodes = x.size(0)
-
         # Create functional group embeddings for each node
-        expanded_encoding = torch.zeros((num_nodes, self.embedding_dim), device=x.device)
+        group_ids = torch.zeros(num_nodes, dtype=torch.long, device=x.device)
         for group_id, nodes in enumerate(self.functional_groups.values()):
-            group_embedding = self.group_embedding(torch.tensor(group_id, device=x.device))
-            expanded_encoding[nodes] = group_embedding
-
+            group_ids[nodes] = group_id
+        # Use embedding layer to get group embeddings
+        expanded_encoding = self.group_embedding(group_ids)
         # Concatenate node features with functional group embeddings
         x = torch.cat([x, expanded_encoding], dim=-1)  # [N, in_channels + embedding_dim]
         x = self.dropout(x)
-
         # Map concatenated features to hidden_dim
         x = self.relu(Linear(x.size(-1), self.hidden_dim).to(x.device)(x))
-
-        # Encode edge attributes to match hidden_dim
-        edge_emb = self.relu(self.edge_encoder(edge_attr))
-
-        # Apply GINEConv
-        x = self.conv(x, edge_index, edge_attr=edge_emb)
-
-        # Apply activation and normalization
-        x = self.relu(x)
         x = self.bn(x)
         x = self.dropout(x)
-
+        # Apply GINEConv
+        x = self.conv(x, edge_index, edge_attr=edge_attr)
+        # Apply activation and normalization
+        x = self.relu(x)
         return x, edge_attr
 
 class AlternateConvolution(Module):
@@ -260,55 +240,59 @@ class AlternateConvolution(Module):
 class AttentionPooling(nn.Module):
     def __init__(self, in_features, hidden_dim):
         super(AttentionPooling, self).__init__()
+        # Attention mechanism: projecting node features into hidden_dim space and then to scalar weights
         self.project = nn.Sequential(
-            nn.Linear(in_features, hidden_dim),
+            nn.Linear(in_features, hidden_dim),  # Project node features to hidden_dim
             nn.Tanh(),
-            nn.Linear(hidden_dim, 1, bias=False)
+            nn.Linear(hidden_dim, 1, bias=False)  # Scalar attention weight
         )
 
     def forward(self, x, batch, mask=None):
-        # x: shape [total_num_nodes, in_features]
-        # batch: shape [total_num_nodes] (indicating the graph index for each node)
-        
-        # Compute attention weights
+        """
+        x: Node features of shape [total_num_nodes, in_features]
+        batch: Tensor of shape [total_num_nodes] indicating the graph index for each node
+        mask: Optional mask for ignoring certain nodes (if provided)
+        """
+        # Compute attention weights per node
         weights = self.project(x).squeeze(-1)  # Shape: [total_num_nodes]
+        
         if mask is not None:
-            weights = weights.masked_fill(mask == 0, -1e9)  # Apply mask
-        weights = F.softmax(weights, dim=0)  # Normalize across nodes
+            weights = weights.masked_fill(mask == 0, -1e9)  # Mask out invalid nodes
+            
+        # Apply softmax per graph (normalize within each graph)
+        weights = F.softmax(weights, dim=0)  # Shape: [total_num_nodes]
         
-        # Compute the weighted sum of node features per graph
+        # Multiply node features by their attention weights
         x = x * weights.unsqueeze(-1)  # Shape: [total_num_nodes, in_features]
-        x = torch.zeros_like(x).scatter_add_(0, batch.unsqueeze(-1).expand_as(x), x)
         
-        # Pooling using the scatter_add result based on the batch index
-        x = torch.zeros(batch.max() + 1, x.size(1), device=x.device).scatter_add_(
-            0, batch.unsqueeze(-1).expand_as(x), x
-        )  # Shape: [num_graphs, in_features]
+        # Use scatter_add to sum the weighted features per graph
+        out = torch.zeros(batch.max() + 1, x.size(1), device=x.device)
+        out = out.scatter_add(0, batch.unsqueeze(-1).expand_as(x), x)
         
-        return x, weights
+        return out, weights
 
-# GCN
-class BrainBlock(Module):
-    def __init__(self, in_features, out_features, edge_dim=5, heads=1, dropout=0.7):
-        super(BrainBlock, self).__init__()
-        self.conv = GCNConv(in_features, out_features)
-        self.bn = BatchNorm(out_features)  
-        self.dropout = Dropout(p=dropout)
-        self.relu = LeakyReLU()
-        self.reset_parameters()
+# # GCN
+# class BrainBlock(Module):
+#     def __init__(self, in_features, out_features, edge_dim=5, heads=1, dropout=0.7):
+#         super(BrainBlock, self).__init__()
+#         self.conv = GCNConv(in_features, out_features)
+#         self.bn = BatchNorm(out_features)  
+#         self.dropout = Dropout(p=dropout)
+#         self.relu = LeakyReLU()
+#         self.reset_parameters()
 
-    def reset_parameters(self):
-        torch.nn.init.xavier_uniform_(self.conv.lin.weight)  # Apply Xavier initialization to GCNConv weights
-        if hasattr(self.conv, 'bias') and self.conv.lin.bias is not None:
-            torch.nn.init.zeros_(self.conv.lin.bias)  # Initialize bias to zero if it exists
+#     def reset_parameters(self):
+#         torch.nn.init.xavier_uniform_(self.conv.lin.weight)  # Apply Xavier initialization to GCNConv weights
+#         if hasattr(self.conv, 'bias') and self.conv.lin.bias is not None:
+#             torch.nn.init.zeros_(self.conv.lin.bias)  # Initialize bias to zero if it exists
         
-    def forward(self, x, edge_index, edge_attr):
-        edge_weight = torch.abs(edge_attr[:, 0])
-        x = self.conv(x, edge_index, edge_weight)
-        x = self.relu(x)
-        x = self.bn(x)
-        x = self.dropout(x)
-        return x
+#     def forward(self, x, edge_index, edge_attr):
+#         edge_weight = torch.abs(edge_attr[:, 0])
+#         x = self.conv(x, edge_index, edge_weight)
+#         x = self.relu(x)
+#         x = self.bn(x)
+#         x = self.dropout(x)
+#         return x
 
 # # GAT
 # class BrainBlock(Module):
@@ -384,9 +368,9 @@ class BrainBlock(Module):
 #         x = global_add_pool(x, data.batch)
 #         return self.mlp(x)
 
-class BrainNet(torch.nn.Module):
+class BrainNetGIN(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, num_layers, out_channels, functional_groups=None, edge_dim=5, dropout=0.7):
-        super(BrainNet, self).__init__()
+        super(BrainNetGIN, self).__init__()
         self.encemb = BrainEncodeEmbed(
             functional_groups=functional_groups,
             hidden_dim=hidden_channels,
@@ -401,16 +385,17 @@ class BrainNet(torch.nn.Module):
                 GINEConv(
                     nn=Sequential(
                         Linear(hidden_channels, hidden_channels),
-                        LeakyReLU(),
+                        ReLU(),
                         Linear(hidden_channels, hidden_channels)
-                    )
+                    ), edge_dim=edge_dim
                 )
             )
         self.lin1 = Linear(hidden_channels, in_channels)
         self.lin2 = Linear(in_channels, out_channels)
         self.dropout = Dropout(p=dropout)
-        self.relu = LeakyReLU()
+        self.relu = ReLU()
         self.reset_parameters()
+        self.bn = BatchNorm(hidden_channels)
 
     def reset_parameters(self):
         self.encemb.reset_parameters()
@@ -431,36 +416,36 @@ class BrainNet(torch.nn.Module):
     def forward(self, data):
         x, edge_attr = self.encemb(data)
         edge_index = data.edge_index
-        edge_emb = self.encemb.edge_encoder(edge_attr)
         for layer in self.layers:
-            x = layer(x, edge_index, edge_attr=edge_emb)
+            x = layer(x, edge_index, edge_attr=edge_attr)
+            x = self.bn(x)
             x = self.relu(x)
             x = self.dropout(x)
-        x = global_mean_pool(x, data.batch)
+        x = global_add_pool(x, data.batch)
         x = self.lin1(self.relu(x))
         x = self.lin2(x)
         return x
     
-class GCNBlock(torch.nn.Module):
-    def __init__(self, in_features, out_features, dropout=0.7):
-        super(GCNBlock, self).__init__()
-        self.conv = GCNConv(in_features, out_features)
-        self.relu = LeakyReLU()
-        self.bn = BatchNorm(out_features)
-        self.dropout = Dropout(p=dropout)
+# class GCNBlock(torch.nn.Module):
+#     def __init__(self, in_features, out_features, dropout=0.7):
+#         super(GCNBlock, self).__init__()
+#         self.conv = GCNConv(in_features, out_features)
+#         self.relu = LeakyReLU()
+#         self.bn = BatchNorm(out_features)
+#         self.dropout = Dropout(p=dropout)
         
-    def forward(self, x, edge_index, edge_weight):
-        edge_weight = (edge_weight + 1) / 2  # Normalize from [-1, 1] to [0, 1]
-        x = self.conv(x, edge_index, edge_weight)
-        x = self.relu(x)
-        x = self.bn(x)
-        x = self.dropout(x)
-        return x
+#     def forward(self, x, edge_index, edge_weight):
+#         edge_weight = (edge_weight + 1) / 2  # Normalize from [-1, 1] to [0, 1]
+#         x = self.conv(x, edge_index, edge_weight)
+#         x = self.relu(x)
+#         x = self.bn(x)
+#         x = self.dropout(x)
+#         return x
 
-class GCN(torch.nn.Module):
+class BrainNetGCN(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, num_layers, out_channels, functional_groups=None, edge_dim=5, dropout=0.7):
-        super(GCN, self).__init__()
-        self.encemb = OGBrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
+        super(BrainNetGCN, self).__init__()
+        self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
         self.bn_node = BatchNorm(hidden_channels)
         self.bn_edge = BatchNorm(edge_dim)
         self.layers = torch.nn.ModuleList()
@@ -486,37 +471,39 @@ class GCN(torch.nn.Module):
         x = self.lin2(x)
         return x
     
-class GATBlock(torch.nn.Module):
-    def __init__(self, in_features, out_features, heads=1, dropout=0.5, edge_dim=5):
-        super(GATBlock, self).__init__()
-        self.conv = GATv2Conv(in_features, out_features, heads=heads, dropout=dropout, edge_dim=edge_dim)
-        self.bn = BatchNorm(out_features*heads)
-        self.relu = LeakyReLU()
+# class GATBlock(torch.nn.Module):
+#     def __init__(self, in_features, out_features, heads=1, dropout=0.5, edge_dim=5):
+#         super(GATBlock, self).__init__()
+#         self.conv = GATv2Conv(in_features, out_features, heads=heads, dropout=dropout, edge_dim=edge_dim, concat=False)
+#         self.bn = BatchNorm(out_features)
+#         self.relu = LeakyReLU()
         
-    def forward(self, x, edge_index, edge_attr):
-        x = self.conv(x, edge_index, edge_attr)
-        x = self.bn(x)
-        x = self.relu(x)
-        return x
+#     def forward(self, x, edge_index, edge_attr):
+#         x = self.conv(x, edge_index, edge_attr)
+#         x = self.bn(x)
+#         x = self.relu(x)
+#         return x
 
-class GAT(torch.nn.Module):
-    def __init__(self, hidden_channels, num_layers, out_channels, functional_groups=None, heads=1, edge_dim=5, dropout=0.5):
-        super(GAT, self).__init__()
+class BrainNetGAT(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels, num_layers, out_channels, functional_groups=None, heads=1, edge_dim=5, dropout=0.5):
+        super(BrainNetGAT, self).__init__()
         self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
         self.layers = torch.nn.ModuleList()
         for _ in range(num_layers):
-            if len(self.layers) == 0:
-                self.layers.append(GATBlock(hidden_channels, hidden_channels, heads=heads, dropout=dropout, edge_dim=edge_dim))
-            else:
-                self.layers.append(GATBlock(hidden_channels*heads, hidden_channels, heads=heads, dropout=dropout, edge_dim=edge_dim))
-        self.fc2 = Linear(hidden_channels*heads, out_channels)
+            self.layers.append(GATv2Conv(hidden_channels, hidden_channels, heads=heads, dropout=dropout, edge_dim=edge_dim, concat=False))
+        self.pooling = AttentionPooling(hidden_channels, hidden_channels)
+        self.lin1 = Linear(hidden_channels, in_channels)
+        self.lin2 = Linear(in_channels, out_channels)
 
     def forward(self, data):
         x, edge_attr = self.encemb(data)
         for _, layer in enumerate(self.layers):
             x = layer(x, data.edge_index, edge_attr)
-        x = global_mean_pool(x, data.batch)
-        x = self.fc2(x)
+            x = F.relu(x)
+        x, attn_weights = self.pooling(x, data.batch)
+        x_fea = self.lin1(x)
+        x = F.relu(x_fea)
+        x = self.lin2(x)
         return x
     
 
@@ -528,13 +515,13 @@ def get_model(args, edge_dim=5):
     out_channels = 4 #
     dropout = args.dropout
     heads = args.heads
-    act = LeakyReLU()
+    act = ReLU()
     groups = yeo_network()
-    if model_name == 'brain':
-        return BrainNet(in_channels=116, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim)
+    if model_name == 'gin':
+        return BrainNetGIN(in_channels=3, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim)
     elif model_name == 'gcn':
-        return GCN(in_channels=116, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim)
+        return BrainNetGCN(in_channels=3, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim)
     elif model_name == 'gat':
-        return GAT(hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, functional_groups=groups, dropout=dropout, heads=heads, edge_dim=edge_dim)
+        return BrainNetGAT(in_channels=3, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim, heads=heads) 
     else:
         raise ValueError(f'Unknown model name: {model_name}')

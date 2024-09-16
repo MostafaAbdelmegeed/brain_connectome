@@ -6,8 +6,7 @@ import argparse
 import torch
 import numpy as np
 
-# python polished/main.py --gpu_id 0 --dataset ppmi --seed 10 --n_folds 10 --epochs 300 --batch_size 8 --learning_rate 0.0001 --hidden_dim 256 --n_layers 1 --dropout 0.5 --heads 1 --patience 30 --test_size 0.2 --percentile 0.9 --augmented --model brain
-
+# python -u polished/main.py --dataset ppmi --seed 0 --n_folds 2 --epochs 5 -- patience 5 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.3 --heads 1 --test_size 0.1 --percentile 0.9 --model gin --gpu_id 0 
 def print_with_timestamp(message):
     timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     print(f"{timestamp}\t{message}")
@@ -31,7 +30,7 @@ def parse_args():
     parser.add_argument('--augmented', action='store_true', help='Use augmented data')
     parser.add_argument('--augment_validation', action='store_true', help='Augment validation data')
     parser.add_argument('--span', type=float, default=0.02, help='Span for augmented data')
-    parser.add_argument('--model', type=str, default='brain', help='Model name')
+    parser.add_argument('--model', type=str, default='gin', help='Model name')
     parser.add_argument('--vanilla', action='store_true', help='Use vanilla dataset')
     parser.add_argument('--exp_code', type=str, default='-', help='Experiment code')
     parser.add_argument('--run_name', type=str, default='', help='Run name')

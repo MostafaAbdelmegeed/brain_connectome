@@ -1,4 +1,3 @@
-
 import torch
 import numpy as np
 import datetime
@@ -12,7 +11,7 @@ from dataset import BrainDataset, VanillaDataset
 
 from torch.utils.data import TensorDataset, Subset
 
-from dataset import collate_function
+# from dataset import collate_function
 from models import get_model
 
 import matplotlib.pyplot as plt
@@ -109,22 +108,22 @@ def train(args, device):
         print_with_timestamp(f"Fold {fold + 1}/{n_folds}")
         train_data = Subset(dataset, train_index)
         test_data = Subset(dataset, test_index)
-        # Create StratifiedShuffleSplit instance for splitting train_data into train/val
-        # Extract labels for train_data subset
-        training_labels = [labels[i] for i in train_index]
-        stratified_split = StratifiedShuffleSplit(n_splits=1, test_size=val_size, random_state=seed)
-        train_indices, val_indices = next(stratified_split.split(range(len(train_data)), training_labels))
-        train_subset = Subset(train_data, train_indices)
-        val_subset = Subset(train_data, val_indices)
+        # # Create StratifiedShuffleSplit instance for splitting train_data into train/val
+        # # Extract labels for train_data subset
+        # training_labels = [labels[i] for i in train_index]
+        # stratified_split = StratifiedShuffleSplit(n_splits=1, test_size=val_size, random_state=seed)
+        # train_indices, val_indices = next(stratified_split.split(range(len(train_data)), training_labels))
+        # train_subset = Subset(train_data, train_indices)
+        # val_subset = Subset(train_data, val_indices)
 
         # Create a DataLoader for the training subset with batch_size=1 for individual processing
         train_loader_for_process_and_augment = DataLoader(
-            train_subset, batch_size=1, shuffle=False, generator=generator
+            train_data, batch_size=1, shuffle=False, generator=generator
         )
+        # val_loader_for_process = DataLoader(
+        #     val_subset, batch_size=1, shuffle=False, generator=generator
+        # )
         val_loader_for_process = DataLoader(
-            val_subset, batch_size=1, shuffle=False, generator=generator
-        )
-        test_loader_for_process = DataLoader(
             test_data, batch_size=1, shuffle=False, generator=generator
         )
         
@@ -138,39 +137,39 @@ def train(args, device):
         )
 
         processed_val_data = process(val_loader_for_process, device=device, percentile=args.percentile, augment=args.augment_validation, span=augmenation_span)
-        processed_test_data = process(test_loader_for_process, device=device, percentile=args.percentile)
+        # processed_test_data = process(test_loader_for_process, device=device, percentile=args.percentile)
 
         # Directly use the augmented data for training
         if args.vanilla:
             augmented_train_dataset = VanillaDataset(augmented_train_data)
             val_dataset = VanillaDataset(processed_val_data)
-            test_dataset = VanillaDataset(processed_test_data)
+            # test_dataset = VanillaDataset(processed_test_data)
         else:
             augmented_train_dataset = BrainDataset(augmented_train_data)
             val_dataset = BrainDataset(processed_val_data)
-            test_dataset = BrainDataset(processed_test_data)
+            # test_dataset = BrainDataset(processed_test_data)
         edge_dim = augmented_train_dataset.edge_attr_dim()
         # Extract labels from each dataset
         train_labels = [data.y.item() for data in augmented_train_dataset]
         val_labels = [data.y.item() for data in val_dataset]
-        test_labels = [data.y.item() for data in test_dataset]
+        # test_labels = [data.y.item() for data in test_dataset]
 
         # Calculate label distributions
         train_label_distribution = np.bincount(train_labels)
         val_label_distribution = np.bincount(val_labels)
-        test_label_distribution = np.bincount(test_labels)
+        # test_label_distribution = np.bincount(test_labels)
 
         # Print label distributions
         print_with_timestamp(f"Training labels distribution: {train_label_distribution}")
         print_with_timestamp(f"Validation labels distribution: {val_label_distribution}")
-        print_with_timestamp(f"Test labels distribution: {test_label_distribution}")
+        # print_with_timestamp(f"Test labels distribution: {test_label_distribution}")
 
         train_loader = DataLoader(augmented_train_dataset, batch_size=batch_size, shuffle=True, generator=generator)
-        train_loader.collate_fn = collate_function
+        # train_loader.collate_fn = collate_function
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, generator=generator)
-        val_loader.collate_fn = collate_function
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, generator=generator)
-        test_loader.collate_fn = collate_function
+        # val_loader.collate_fn = collate_function
+        # test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, generator=generator)
+        # test_loader.collate_fn = collate_function
 
         model = get_model(args, edge_dim).to(device)
         optimizer = torch.optim.Adam(model.parameters(), weight_decay=0.00005, lr=learning_rate)
@@ -179,8 +178,9 @@ def train(args, device):
         # Class weights
         class_weights = compute_class_weight('balanced', classes=np.unique(train_labels), y=train_labels)
         class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
-        class_weights[0] = class_weights[0] *2      # Adjust the weight for the first class
-        class_weights[3] = class_weights[3] *1.5  # Adjust the weight for the first class
+        # class_weights[0] = class_weights[0] *2      # Adjust the weight for the first class
+        # class_weights[1] = class_weights[0] *2      # Adjust the weight for the first class
+        # class_weights[3] = class_weights[3] *2  # Adjust the weight for the first class
         print_with_timestamp(f'Class weights: {class_weights}')
         print_with_timestamp(f"Epoch/Loss\t||\tTraining\t|\tValidation\t")
         criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(device)
@@ -242,6 +242,7 @@ def train(args, device):
             # Compute additional metrics using scikit-learn
             val_f1 = f1_score(val_labels, val_preds, average='weighted', zero_division=0)  # weighted for class imbalance
             val_precision = precision_score(val_labels, val_preds, average='weighted', zero_division=0)
+            conf_matrix = confusion_matrix(val_labels, val_preds)
 
             writer.add_scalar(f'Fold_{fold+1}/Metrics/Val_Loss', val_loss, epoch)
             writer.add_scalar(f'Fold_{fold+1}/Metrics/Val_Accuracy', val_accuracy, epoch)
@@ -274,36 +275,37 @@ def train(args, device):
             
         # Step the scheduler after each epoch
         scheduler.step(metrics=val_loss)
-        # Load the best model state
-        model.load_state_dict(best_model_state)
+        print_with_timestamp(f"Fold {fold +1} Best Metrics: Accuracy: {best_val_acc:.4f}, Precision: {best_val_precision:.4f}, F1 Score: {best_val_f1:.4f}")
+        # # Load the best model state
+        # model.load_state_dict(best_model_state)
         
-        # Evaluate the model on the test set
-        model.eval()
-        test_preds = []
-        test_labels = []
+        # # Evaluate the model on the test set
+        # model.eval()
+        # test_preds = []
+        # test_labels = []
 
-        for data in test_loader:
-            data = data.to(device)
-            with torch.no_grad():
-                output = model(data)
-                preds = output.argmax(dim=1)
-                test_preds.extend(preds.cpu().numpy())
-                test_labels.extend(data.y.cpu().numpy())
+        # for data in test_loader:
+        #     data = data.to(device)
+        #     with torch.no_grad():
+        #         output = model(data)
+        #         preds = output.argmax(dim=1)
+        #         test_preds.extend(preds.cpu().numpy())
+        #         test_labels.extend(data.y.cpu().numpy())
 
 
-        # Compute metrics
-        acc = accuracy_score(test_labels, test_preds)
-        precision = precision_score(test_labels, test_preds, average='weighted', zero_division=0)
-        f1 = f1_score(test_labels, test_preds, average='weighted')
+        # # Compute metrics
+        # acc = accuracy_score(test_labels, test_preds)
+        # precision = precision_score(test_labels, test_preds, average='weighted', zero_division=0)
+        # f1 = f1_score(test_labels, test_preds, average='weighted')
 
         # Confusion matrix for the test set
-        conf_matrix = confusion_matrix(test_labels, test_preds)
+        
 
-        writer.add_scalar(f'Fold_{fold+1}/Test_Accuracy', acc, epoch)
-        writer.add_scalar(f'Fold_{fold+1}/Test_Precision', precision, epoch)
-        writer.add_scalar(f'Fold_{fold+1}/Test_F1', f1, epoch)
-        print_with_timestamp(f"Fold {fold +1} Best Metrics: Accuracy: {best_val_acc:.4f}, Precision: {best_val_precision:.4f}, F1 Score: {best_val_f1:.4f}")
-        print_with_timestamp(f"Fold {fold + 1} Test Metrics: Accuracy: {acc:.4f}, Precision: {precision:.4f}, F1 Score: {f1:.4f}")
+        # writer.add_scalar(f'Fold_{fold+1}/Test_Accuracy', acc, epoch)
+        # writer.add_scalar(f'Fold_{fold+1}/Test_Precision', precision, epoch)
+        # writer.add_scalar(f'Fold_{fold+1}/Test_F1', f1, epoch)
+        
+        # print_with_timestamp(f"Fold {fold + 1} Test Metrics: Accuracy: {acc:.4f}, Precision: {precision:.4f}, F1 Score: {f1:.4f}")
 
         # Store metrics for the current fold
         all_fold_metrics['accuracy'].append(best_val_acc)
