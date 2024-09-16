@@ -447,19 +447,22 @@ class BrainNetGCN(torch.nn.Module):
         super(BrainNetGCN, self).__init__()
         self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
         self.bn_node = BatchNorm(hidden_channels)
-        self.bn_edge = BatchNorm(edge_dim)
+        # self.bn_edge = BatchNorm(edge_dim)
         self.layers = torch.nn.ModuleList()
         for _ in range(num_layers):
             self.layers.append(GCNConv(hidden_channels, hidden_channels))
         self.lin1 = Linear(hidden_channels, in_channels)
         self.lin2 = Linear(in_channels, out_channels)
+        self.edge_weight_transform = Linear(edge_dim, 1)  # Learnable transformation from 5D to 1D
         self.dropout = dropout
 
     def forward(self, data):
         x, edge_attr = self.encemb(data)
         x = self.bn_node(x)
-        edge_attr = self.bn_edge(edge_attr)
-        edge_weight = torch.abs(edge_attr[:, 0])
+        # # edge_attr = self.bn_edge(edge_attr)
+        # edge_weight = torch.abs(edge_attr[:, 0])
+        # Learnable weighted sum for edge attributes
+        edge_weight = F.relu(self.edge_weight_transform(edge_attr).squeeze())
         edge_index = data.edge_index
         for layer in self.layers:
             x = layer(x, edge_index, edge_weight)

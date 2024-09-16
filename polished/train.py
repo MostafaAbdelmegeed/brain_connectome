@@ -212,6 +212,7 @@ def train(args, device):
                 total_predictions += data.y.size(0)
                 all_preds.extend(preds.cpu().numpy())
                 all_labels.extend(data.y.cpu().numpy())
+            
         
 
             train_loss /= len(train_loader)
