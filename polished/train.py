@@ -175,7 +175,7 @@ def train(args, device):
         # test_loader.collate_fn = collate_function
 
         model = get_model(args, edge_dim).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), weight_decay=0.00005, lr=learning_rate)
+        optimizer = torch.optim.Adam(model.parameters(), weight_decay=0.00001, lr=learning_rate)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
 
         # Class weights

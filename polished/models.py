@@ -531,7 +531,27 @@ class BrainNetAltGCN(torch.nn.Module):
         x = self.lin2(x).squeeze(1)
         return x
     
-    
+class BrainNetResGated(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels, num_layers, out_channels, functional_groups=None, heads=1, edge_dim=5, dropout=0.5):
+        super(BrainNetResGated, self).__init__()
+        self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
+        self.layers = torch.nn.ModuleList()
+        for _ in range(num_layers):
+            self.layers.append(ResGatedGraphConv(in_channels=hidden_channels, out_channels=hidden_channels, edge_dim=edge_dim, act=ReLU()))
+        self.lin1 = Linear(hidden_channels, in_channels)
+        self.lin2 = Linear(in_channels, out_channels)
+        self.dropout = dropout
+
+    def forward(self, data):
+        x, edge_attr = self.encemb(data)
+        for _, layer in enumerate(self.layers):
+            x = layer(x, data.edge_index, edge_attr)
+            x = F.dropout(x, p=self.dropout, training=self.training)
+        x = global_mean_pool(x, data.batch)
+        x_fea = self.lin1(x)
+        x = F.relu(x_fea)
+        x = self.lin2(x).squeeze(1)
+        return x
 
 
 def get_model(args, edge_dim=5):
@@ -551,5 +571,7 @@ def get_model(args, edge_dim=5):
         return BrainNetGAT(in_channels=3, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim, heads=heads) 
     elif model_name == 'alt_gcn':
         return BrainNetAltGCN(in_channels=3, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim)
+    elif model_name == 'res_gated':
+        return BrainNetResGated(in_channels=3, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim)
     else:
         raise ValueError(f'Unknown model name: {model_name}')
