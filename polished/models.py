@@ -164,7 +164,6 @@ class AlternateConvolution(Module):
         self.out_features_e = out_features_e
         self.in_features_v = in_features_v
         self.out_features_v = out_features_v
-        self.dropout = Dropout(p=dropout)  # Adding dropout here
         if node_layer:
             self.node_layer = True
             self.weight = Parameter(torch.FloatTensor(in_features_v, out_features_v))
@@ -200,8 +199,8 @@ class AlternateConvolution(Module):
         batch_size = adj_v.shape[0]//adj_v.shape[1]
         H_v = H_v.view(batch_size, -1, self.in_features_v)
         H_e = H_e.view(batch_size, -1, self.in_features_e).type(torch.float32)
-        adj_e = adj_e.view(batch_size, -1, adj_e.size(1), adj_e.size(1)).squeeze(1)
-        adj_v = adj_v.view(batch_size, -1, adj_v.size(1), adj_v.size(1)).squeeze(1)
+        adj_e = adj_e.to_dense().view(batch_size, -1, adj_e.size(1), adj_e.size(1)).squeeze(1)
+        adj_v = adj_v.to_dense().view(batch_size, -1, adj_v.size(1), adj_v.size(1)).squeeze(1)
         T = T.to_dense().view(batch_size, -1, T.size(0)//batch_size, T.size(1)).squeeze(1)
         if self.node_layer:
             H_e_p = H_e @ self.p.t()  # Adapted for batch
@@ -227,8 +226,6 @@ class AlternateConvolution(Module):
             normalized_adjusted_A = adjusted_A / (adjusted_A.max(2, keepdim=True)[0] + 1e-10)
             weight_repeated = self.weight.unsqueeze(0).repeat(batch_size, 1, 1)
             output = torch.bmm(normalized_adjusted_A, torch.bmm(H_e, weight_repeated))
-            # Apply dropout after the edge layer processing
-            output = self.dropout(output)
             if self.bias is not None:
                 output += self.bias
             return H_v, output
@@ -510,6 +507,32 @@ class BrainNetGAT(torch.nn.Module):
         return x
     
 
+class BrainNetAltGCN(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels, num_layers, out_channels, functional_groups=None, heads=1, edge_dim=5, dropout=0.5):
+        super(BrainNetAltGCN, self).__init__()
+        self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
+        self.layers = torch.nn.ModuleList()
+        for _ in range(num_layers):
+            self.layers.append(AlternateConvolution(in_features_v=hidden_channels, out_features_v=hidden_channels, in_features_e=edge_dim, out_features_e=edge_dim, node_layer=(len(self.layers)%2==0), dropout=dropout))
+        self.lin1 = Linear(hidden_channels, in_channels)
+        self.lin2 = Linear(in_channels, out_channels)
+        self.dropout = dropout
+
+    def forward(self, data):
+        x, edge_attr = self.encemb(data)
+        n_adj, e_adj, transition = data.node_adj, data.edge_adj, data.transition
+        for _, layer in enumerate(self.layers):
+            x, edge_attr = layer(x, edge_attr, e_adj, n_adj, transition)
+            x, edge_attr = F.relu(x), F.relu(edge_attr)
+            x, edge_attr = F.dropout(x, p=self.dropout, training=self.training), F.dropout(edge_attr, p=self.dropout, training=self.training)
+        x = global_mean_pool(x, data.batch)
+        x_fea = self.lin1(x)
+        x = F.relu(x_fea)
+        x = self.lin2(x).squeeze(1)
+        return x
+    
+    
+
 
 def get_model(args, edge_dim=5):
     model_name = args.model
@@ -526,5 +549,7 @@ def get_model(args, edge_dim=5):
         return BrainNetGCN(in_channels=3, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim)
     elif model_name == 'gat':
         return BrainNetGAT(in_channels=3, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim, heads=heads) 
+    elif model_name == 'alt_gcn':
+        return BrainNetAltGCN(in_channels=3, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim)
     else:
         raise ValueError(f'Unknown model name: {model_name}')

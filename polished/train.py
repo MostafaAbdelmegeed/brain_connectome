@@ -165,9 +165,12 @@ def train(args, device):
         # print_with_timestamp(f"Test labels distribution: {test_label_distribution}")
 
         train_loader = DataLoader(augmented_train_dataset, batch_size=batch_size, shuffle=True, generator=generator)
-        # train_loader.collate_fn = collate_function
+        
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, generator=generator)
-        # val_loader.collate_fn = collate_function
+        
+        # if args.model == 'alt_gcn':
+        #     train_loader.collate_fn = collate_function
+        #     val_loader.collate_fn = collate_function
         # test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, generator=generator)
         # test_loader.collate_fn = collate_function
 
