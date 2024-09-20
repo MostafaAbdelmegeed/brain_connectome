@@ -187,7 +187,7 @@ def train(args, device):
         # class_weights[3] = class_weights[3] *2  # Adjust the weight for the first class
         print_with_timestamp(f'Class weights: {class_weights}')
         print_with_timestamp(f"Epoch/Loss\t||\tTraining\t|\tValidation\t")
-        criterion = torch.nn.CrossEntropyLoss(weight=class_weights).to(device)
+        criterion = torch.nn.CrossEntropyLoss().to(device)
 
         best_val_loss = float('inf')
         best_val_acc = 0
