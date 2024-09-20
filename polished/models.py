@@ -98,63 +98,48 @@ def print_with_timestamp(message):
 #         return x, edge_attr
 
 class BrainEncodeEmbed(torch.nn.Module):
-    def __init__(self, functional_groups, hidden_dim, edge_dim, n_roi=116, embedding_dim=16, dropout=0.7):
+    def __init__(self, functional_groups, hidden_dim, embedding_dim=2, dropout=0.7):
         super(BrainEncodeEmbed, self).__init__()
         self.functional_groups = functional_groups
         self.n_groups = len(functional_groups)
         self.hidden_dim = hidden_dim
-        self.num_nodes = n_roi
         self.embedding_dim = embedding_dim
-        self.dropout_rate = dropout
+        # Linear layer to transform edge attributes (3-dimensional) to scalar edge weight
+        self.edge_weight_transform = Linear(-1, 1)
         # Define a learnable embedding layer for functional groups
         self.group_embedding = torch.nn.Embedding(self.n_groups, self.embedding_dim)
-        # MLP for GINEConv (node feature transformation)
-        self.mlp = Sequential(
-            Linear(hidden_dim, hidden_dim),
-            ReLU(),
-            Linear(hidden_dim, hidden_dim)
-        )
-        # GINEConv layer
-        self.conv = GINEConv(nn=self.mlp, edge_dim=edge_dim)
-        self.relu = ReLU()
-        self.dropout = Dropout(p=self.dropout_rate)
-        self.bn = BatchNorm(hidden_dim)
+        # Dropout layer
+        self.drop = torch.nn.Dropout(p=dropout)
         self.reset_parameters()
+        
 
     def reset_parameters(self):
         # Initialize group embeddings
         torch.nn.init.xavier_uniform_(self.group_embedding.weight)
-        # Initialize MLP layers in GINEConv
-        for layer in self.mlp:
-            if isinstance(layer, Linear):
-                torch.nn.init.xavier_uniform_(layer.weight)
-                torch.nn.init.zeros_(layer.bias)
-        # Initialize LayerNorm
-        if hasattr(self.bn, 'reset_parameters'):
-            self.bn.reset_parameters()
 
     def forward(self, data):
         x = data.x  # Node features [N, in_channels]
-        edge_index = data.edge_index  # Edge indices [2, E]
-        edge_attr = data.edge_attr  # Edge features [E, edge_dim]
-        num_nodes = x.size(0)
         # Create functional group embeddings for each node
-        group_ids = torch.zeros(num_nodes, dtype=torch.long, device=x.device)
+        edge_attr = data.edge_attr.float()  # Edge features [E, edge_dim]
+        # Transform multi-dimensional edge attributes into scalar edge weight
+        edge_attr = torch.abs(self.edge_weight_transform(edge_attr).squeeze())  # [E, 1] -> [E]
+        # edge_attr = (edge_attr - edge_attr.min()) / (edge_attr.max() - edge_attr.min() + 1e-6)  # Avoid division by zero
+        # # Add a small constant to avoid zero or negative edge weights
+        # edge_attr = torch.clamp(edge_attr, min=0.001)  # Clamp to avoid zero or negative values
+        # print_with_timestamp(f"Edge attributes shape: {edge_attr.shape}, Edge attributes min: {edge_attr.min()}, Edge attributes max: {edge_attr.max()}")
+        # Apply dropout to the edge attributes to regularize the edge weights
+        # edge_attr = self.drop(edge_attr)
+        # Dynamically create group_ids based on actual batch size
+        # Use embedding layer to get group embeddings
+        group_ids = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
         for group_id, nodes in enumerate(self.functional_groups.values()):
             group_ids[nodes] = group_id
         # Use embedding layer to get group embeddings
         expanded_encoding = self.group_embedding(group_ids)
         # Concatenate node features with functional group embeddings
         x = torch.cat([x, expanded_encoding], dim=-1)  # [N, in_channels + embedding_dim]
-        x = self.dropout(x)
-        # Map concatenated features to hidden_dim
-        x = self.relu(Linear(x.size(-1), self.hidden_dim).to(x.device)(x))
-        x = self.bn(x)
-        x = self.dropout(x)
-        # Apply GINEConv
-        x = self.conv(x, edge_index, edge_attr=edge_attr)
-        # Apply activation and normalization
-        x = self.relu(x)
+        # Apply dropout to the combined node features and embeddings
+        x = self.drop(x)
         return x, edge_attr
 
 class AlternateConvolution(Module):
@@ -440,30 +425,42 @@ class BrainNetGIN(torch.nn.Module):
 #         return x
 
 class BrainNetGCN(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, num_layers, out_channels, functional_groups=None, edge_dim=5, dropout=0.7):
+    def __init__(self, in_channels, hidden_channels, num_layers, out_channels, functional_groups=None, embedding_dim=2, dropout=0.7):
         super(BrainNetGCN, self).__init__()
-        self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, edge_dim=edge_dim, n_roi=116)
-        self.bn_node = BatchNorm(hidden_channels)
-        # self.bn_edge = BatchNorm(edge_dim)
+        self.encemb = BrainEncodeEmbed(functional_groups=functional_groups, hidden_dim=hidden_channels, embedding_dim=embedding_dim)
+        # self.bn_node = BatchNorm(hidden_channels)
+        # self.bn_edge = BatchNorm(1)
         self.layers = torch.nn.ModuleList()
         for _ in range(num_layers):
-            self.layers.append(GCNConv(hidden_channels, hidden_channels, add_self_loops=True))
+            self.layers.append(GCNConv(-1, hidden_channels, add_self_loops=True))
         self.lin1 = Linear(hidden_channels, in_channels)
         self.lin2 = Linear(in_channels, out_channels)
-        self.edge_weight_transform = Linear(edge_dim, 1)  # Learnable transformation from 5D to 1D
+        # self.edge_weight_transform = Linear(edge_dim, 1)  # Learnable transformation from 5D to 1D
         self.dropout = dropout
 
     def forward(self, data):
-        x, edge_attr = self.encemb(data)
-        x = self.bn_node(x)
+        x, edge_weight = self.encemb(data)
+        
+        # x = data.x
+        # edge_weight = data.edge_attr[:,0].float()
+        # print_with_timestamp(f"Input features shape: {x.shape}, Edge weights shape: {edge_weight.shape}")
+        # print_with_timestamp(f'x min: {x.min()}, x max: {x.max()}')
+        # print_with_timestamp(f'edge_weight min: {edge_weight.min()}, edge_weight max: {edge_weight.max()}')
+        # x = self.bn_node(x)
         # # edge_attr = self.bn_edge(edge_attr)
         # edge_weight = torch.abs(edge_attr[:, 0])
         # Learnable weighted sum for edge attributes
-        edge_weight = F.relu(self.edge_weight_transform(edge_attr).squeeze())
+        # x, edge_index, edge_weight = data.x, data.edge_index, data.edge_attr
         edge_index = data.edge_index
+        # edge_weight = self.edge_weight_transform(data.edge_attr)
+        # edge_weight = self.bn_edge(edge_weight.unsqueeze(1)).squeeze()  # Normalize edge weights
+        
         for layer in self.layers:
+            # print_with_timestamp(f'x min: {x.min()}, x max: {x.max()}')
+            # print_with_timestamp(f'edge_weight min: {edge_weight.min()}, edge_weight max: {edge_weight.max()}')
             x = layer(x, edge_index, edge_weight)
             x = F.relu(x)
+            # x = self.bn_node(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
         x = global_mean_pool(x, data.batch) 
         x_fea = self.lin1(x)
@@ -566,7 +563,7 @@ def get_model(args, edge_dim=5):
     if model_name == 'gin':
         return BrainNetGIN(in_channels=3, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim)
     elif model_name == 'gcn':
-        return BrainNetGCN(in_channels=3, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim)
+        return BrainNetGCN(in_channels=116, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups)
     elif model_name == 'gat':
         return BrainNetGAT(in_channels=3, hidden_channels=hidden_dim, num_layers=n_layers, out_channels=out_channels, dropout=dropout, functional_groups=groups, edge_dim=edge_dim, heads=heads) 
     elif model_name == 'alt_gcn':

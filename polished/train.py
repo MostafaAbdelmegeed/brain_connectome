@@ -7,7 +7,7 @@ from sklearn.metrics import f1_score, accuracy_score, precision_score, confusion
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.model_selection import StratifiedKFold, train_test_split, StratifiedShuffleSplit
 from torch_geometric.loader import DataLoader
-from dataset import BrainDataset, VanillaDataset
+from dataset import BrainDataset, VanillaDataset, Dataset_PPMI
 
 from torch.utils.data import TensorDataset, Subset
 
@@ -90,11 +90,12 @@ def train(args, device):
     # Initialize lists to store metrics for all folds
     all_fold_metrics = {'accuracy': [], 'precision': [], 'f1': [], 'conf_matrix':[]}
 
-    dataset = torch.load(f'data/{dataset}.pth')
-    dataset = {key: dataset[key] for key in ['matrix', 'label']}
-    matrices = dataset['matrix']
-    labels = dataset['label']
-    dataset = TensorDataset(matrices, labels)
+    # dataset = torch.load(f'data/{dataset}.pth')
+    # dataset = {key: dataset[key] for key in ['matrix', 'label']}
+    # matrices = dataset['matrix']
+    # labels = dataset['label']
+    # dataset = TensorDataset(matrices, labels)
+    dataset = Dataset_PPMI('data/PPMI')
     # Get the current timestamp
     timestamp = datetime.datetime.now().strftime("%m-%d-%H-%M-%S")
     # TensorBoard writer
@@ -104,10 +105,10 @@ def train(args, device):
 
     generator = torch.Generator().manual_seed(seed)
     # Training and evaluation loop
-    for fold, (train_index, test_index) in enumerate(skf.split(matrices, labels)):
+    for fold, (train_index, test_index) in enumerate(skf.split(dataset.data, dataset.labels)):
         print_with_timestamp(f"Fold {fold + 1}/{n_folds}")
         train_data = Subset(dataset, train_index)
-        test_data = Subset(dataset, test_index)
+        val_data = Subset(dataset, test_index)
         # # Create StratifiedShuffleSplit instance for splitting train_data into train/val
         # # Extract labels for train_data subset
         # training_labels = [labels[i] for i in train_index]
@@ -117,41 +118,41 @@ def train(args, device):
         # val_subset = Subset(train_data, val_indices)
 
         # Create a DataLoader for the training subset with batch_size=1 for individual processing
-        train_loader_for_process_and_augment = DataLoader(
-            train_data, batch_size=1, shuffle=False, generator=generator
-        )
-        # val_loader_for_process = DataLoader(
-        #     val_subset, batch_size=1, shuffle=False, generator=generator
+        # train_loader_for_process_and_augment = DataLoader(
+        #     train_data, batch_size=1, shuffle=False, generator=generator
         # )
-        val_loader_for_process = DataLoader(
-            test_data, batch_size=1, shuffle=False, generator=generator
-        )
+        # # val_loader_for_process = DataLoader(
+        # #     val_subset, batch_size=1, shuffle=False, generator=generator
+        # # )
+        # val_loader_for_process = DataLoader(
+        #     test_data, batch_size=1, shuffle=False, generator=generator
+        # )
         
         # Perform data augmentation
-        augmented_train_data = process(
-            train_loader_for_process_and_augment, 
-            device=device, 
-            percentile=args.percentile, 
-            span=augmenation_span,
-            augment=args.augmented
-        )
+        # augmented_train_data = process(
+        #     train_loader_for_process_and_augment, 
+        #     device=device, 
+        #     percentile=args.percentile, 
+        #     span=augmenation_span,
+        #     augment=args.augmented
+        # )
 
-        processed_val_data = process(val_loader_for_process, device=device, percentile=args.percentile, augment=args.augment_validation, span=augmenation_span)
+        # processed_val_data = process(val_loader_for_process, device=device, percentile=args.percentile, augment=args.augment_validation, span=augmenation_span)
         # processed_test_data = process(test_loader_for_process, device=device, percentile=args.percentile)
 
         # Directly use the augmented data for training
-        if args.vanilla:
-            augmented_train_dataset = VanillaDataset(augmented_train_data)
-            val_dataset = VanillaDataset(processed_val_data)
-            # test_dataset = VanillaDataset(processed_test_data)
-        else:
-            augmented_train_dataset = BrainDataset(augmented_train_data)
-            val_dataset = BrainDataset(processed_val_data)
+        # if args.vanilla:
+        #     augmented_train_dataset = VanillaDataset(augmented_train_data)
+        #     val_dataset = VanillaDataset(processed_val_data)
+        #     # test_dataset = VanillaDataset(processed_test_data)
+        # else:
+        #     augmented_train_dataset = BrainDataset(augmented_train_data)
+        #     val_dataset = BrainDataset(processed_val_data)
             # test_dataset = BrainDataset(processed_test_data)
-        edge_dim = augmented_train_dataset.edge_attr_dim()
+        edge_dim = 1
         # Extract labels from each dataset
-        train_labels = [data.y.item() for data in augmented_train_dataset]
-        val_labels = [data.y.item() for data in val_dataset]
+        train_labels = [data.y.item() for data in train_data]
+        val_labels = [data.y.item() for data in val_data]
         # test_labels = [data.y.item() for data in test_dataset]
 
         # Calculate label distributions
@@ -164,9 +165,9 @@ def train(args, device):
         print_with_timestamp(f"Validation labels distribution: {val_label_distribution}")
         # print_with_timestamp(f"Test labels distribution: {test_label_distribution}")
 
-        train_loader = DataLoader(augmented_train_dataset, batch_size=batch_size, shuffle=True, generator=generator)
+        train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, generator=generator)
         
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, generator=generator)
+        val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, generator=generator)
         
         # if args.model == 'alt_gcn':
         #     train_loader.collate_fn = collate_function
@@ -175,12 +176,12 @@ def train(args, device):
         # test_loader.collate_fn = collate_function
 
         model = get_model(args, edge_dim).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), weight_decay=0.00001, lr=learning_rate)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10)
+        optimizer = torch.optim.Adam(model.parameters(), weight_decay=0.0005, lr=learning_rate)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=300)
 
         # Class weights
         class_weights = compute_class_weight('balanced', classes=np.unique(train_labels), y=train_labels)
-        class_weights = torch.tensor(class_weights, dtype=torch.float).to(device)
+        class_weights = torch.tensor([2.0, 1.0, 1.0, 2.0], dtype=torch.float).to(device)
         # class_weights[0] = class_weights[0] *2      # Adjust the weight for the first class
         # class_weights[1] = class_weights[0] *2      # Adjust the weight for the first class
         # class_weights[3] = class_weights[3] *2  # Adjust the weight for the first class

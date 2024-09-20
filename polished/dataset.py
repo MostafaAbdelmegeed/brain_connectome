@@ -1,5 +1,10 @@
 import torch
 from torch_geometric.data import Data, Dataset, Batch
+import os
+from scipy.io import loadmat
+from torch.utils.data import Dataset as TorchDataset
+from help_funs import *
+import networkx as nx
 
 
 class VanillaDataset(Dataset):
@@ -141,7 +146,7 @@ class BrainDataset(Dataset):
 
         # Build adjacency list for clustering coefficient
         adjacency_list = [[] for _ in range(num_nodes)]
-
+        # print(f'Connectivity min: {connectivity.min()}, max: {connectivity.max()}')
         # Populate edge_index, edge_attr, and compute node features
         for j in range(num_nodes):
             for k in range(num_nodes):
@@ -240,5 +245,164 @@ class BrainDataset(Dataset):
 #         batched_data.append(Data(x=x, edge_index=edge_index, edge_attr=edge_attr, y=data.y, num_nodes=max_nodes,
 #                                  node_adj=node_adj, edge_adj=edge_adj, transition=transition.to_sparse()))
 #     return Batch.from_data_list(batched_data)
+
+
+class Dataset_PPMI(TorchDataset):
+    def __init__(self, root_dir):
+        super(Dataset_PPMI, self).__init__()
+        self.root_dir = root_dir
+        self.data = []
+        self.labels = []
+        self.load_data()
+
+    def load_data(self):
+        sentence_sizes = []
+        for subdir, _, files in os.walk(self.root_dir):
+            for file in files:
+                if 'AAL116_features_timeseries' in file:
+                    file_path = os.path.join(subdir, file)
+                    data = loadmat(file_path)
+                    features = data['data']
+                    sentence_sizes.append(features.shape[0]) 
+                    label = self.get_label(subdir)
+                    self.data.append(features)
+                    self.labels.append(label)
+
+    def get_label(self, subdir):
+        if 'control' in subdir:
+            return 0
+        elif 'patient' in subdir:
+            return 1
+        elif 'prodromal' in subdir:
+            return 2
+        elif 'swedd' in subdir:
+            return 3
+        else:
+            print("Label error")
+            return -1  
+
+    def edge_attr_dim(self):
+        return 1     
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        data = self.data[idx]
+        label = self.labels[idx]
+        data = torch.corrcoef(torch.tensor(data).squeeze().T)
+        data = torch.nan_to_num(data)
+        data = pearson_dataset(data, label, 10)
+        return data
+        # data = torch.tensor(self.data[idx]).float()
+        # label = self.labels[idx]
+        
+        # # Compute the correlation matrix
+        # corr_matrix = torch.corrcoef(data.squeeze().T)
+        # corr_matrix = torch.nan_to_num(corr_matrix)
+        
+        # # Threshold the correlation matrix to create an adjacency matrix
+        # adjacency_matrix = preprocess_adjacency_matrix(corr_matrix, 10)
+        # # Since adjacency_matrix is a tuple, let's print its components
+        # edge_index, edge_attr = from_scipy_sparse_matrix(adjacency_matrix)
+
+        # # Now convert edge_index and edge_attr to graph
+        # G = nx.Graph(adjacency_matrix)
+
+        
+        # # Compute eigenvector centrality
+        # eigenvector_centrality = nx.eigenvector_centrality_numpy(G)
+         
+        # # Create a feature vector where each node feature is its eigenvector centrality score
+        # node_features = torch.tensor([eigenvector_centrality[i] for i in range(len(eigenvector_centrality))]).float().unsqueeze(1)  # Shape [num_nodes, 1]
+        # # Add binary hemisphere feature: 0 for left hemisphere, 1 for right hemisphere
+        # num_nodes = len(eigenvector_centrality)
+        # hemisphere_feature = torch.zeros(num_nodes, 1)  # Initialize with 0 (left hemisphere)
+        # hemisphere_feature[1::2] = 1  # Set to 1 for right hemisphere (alternating L, R)
+        # # Concatenate eigenvector centrality and hemisphere features
+        # node_features = torch.cat([node_features, hemisphere_feature], dim=1)  # Shape [num_nodes, 2]
+        # # Create PyG data object with eigenvector centrality as node features
+        # data = Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, y=torch.tensor(label))
+
+
+
+# class Dataset_PPMI(TorchDataset):
+#     def __init__(self, root_dir):
+#         super(Dataset_PPMI, self).__init__()
+#         self.root_dir = root_dir
+#         self.data = []
+#         self.labels = []
+#         self.load_data()
+
+#     def load_data(self):
+#         sentence_sizes = []
+#         for subdir, _, files in os.walk(self.root_dir):
+#             for file in files:
+#                 if 'AAL116_features_timeseries' in file:
+#                     file_path = os.path.join(subdir, file)
+#                     data = loadmat(file_path)
+#                     features = data['data']
+#                     sentence_sizes.append(features.shape[0]) 
+#                     label = self.get_label(subdir)
+#                     self.data.append(features)
+#                     self.labels.append(label)
+
+#     def get_label(self, subdir):
+#         if 'control' in subdir:
+#             return 0
+#         elif 'patient' in subdir:
+#             return 1
+#         elif 'prodromal' in subdir:
+#             return 2
+#         elif 'swedd' in subdir:
+#             return 3
+#         else:
+#             print("Label error")
+#             return -1  
+
+#     def edge_attr_dim(self):
+#         return 1     
+
+#     def __len__(self):
+#         return len(self.data)
+
+#     def __getitem__(self, idx):
+#         data = self.data[idx]
+#         label = self.labels[idx]
+#         data = torch.corrcoef(torch.tensor(data).squeeze().T)
+#         data = torch.nan_to_num(data)
+#         data = pearson_dataset(data, label, 10)
+#         return data
+#         # data = torch.tensor(self.data[idx]).float()
+#         # label = self.labels[idx]
+        
+#         # # Compute the correlation matrix
+#         # corr_matrix = torch.corrcoef(data.squeeze().T)
+#         # corr_matrix = torch.nan_to_num(corr_matrix)
+        
+#         # # Threshold the correlation matrix to create an adjacency matrix
+#         # adjacency_matrix = preprocess_adjacency_matrix(corr_matrix, 10)
+#         # # Since adjacency_matrix is a tuple, let's print its components
+#         # edge_index, edge_attr = from_scipy_sparse_matrix(adjacency_matrix)
+
+#         # # Now convert edge_index and edge_attr to graph
+#         # G = nx.Graph(adjacency_matrix)
+
+        
+#         # # Compute eigenvector centrality
+#         # eigenvector_centrality = nx.eigenvector_centrality_numpy(G)
+         
+#         # # Create a feature vector where each node feature is its eigenvector centrality score
+#         # node_features = torch.tensor([eigenvector_centrality[i] for i in range(len(eigenvector_centrality))]).float().unsqueeze(1)  # Shape [num_nodes, 1]
+#         # # Add binary hemisphere feature: 0 for left hemisphere, 1 for right hemisphere
+#         # num_nodes = len(eigenvector_centrality)
+#         # hemisphere_feature = torch.zeros(num_nodes, 1)  # Initialize with 0 (left hemisphere)
+#         # hemisphere_feature[1::2] = 1  # Set to 1 for right hemisphere (alternating L, R)
+#         # # Concatenate eigenvector centrality and hemisphere features
+#         # node_features = torch.cat([node_features, hemisphere_feature], dim=1)  # Shape [num_nodes, 2]
+#         # # Create PyG data object with eigenvector centrality as node features
+#         # data = Data(x=node_features, edge_index=edge_index, edge_attr=edge_attr, y=torch.tensor(label))
+        
+#         return data
 
 
