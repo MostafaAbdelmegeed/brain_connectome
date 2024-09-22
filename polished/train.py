@@ -177,7 +177,7 @@ def train(args, device):
 
         model = get_model(args, edge_dim).to(device)
         optimizer = torch.optim.Adam(model.parameters(), weight_decay=0.0005, lr=learning_rate)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=20)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.6, patience=patience//4)
 
         # Class weights
         class_weights = compute_class_weight('balanced', classes=np.unique(train_labels), y=train_labels)
@@ -281,7 +281,7 @@ def train(args, device):
             #         print_with_timestamp(f"{name} has **no** gradient")
 
         
-        print_with_timestamp(f"Fold {fold +1} Best Validation Loss: Train: {best_val_loss:.4f}")
+        print_with_timestamp(f"Fold {fold +1} Best Validation Loss: {best_val_loss:.4f}")
         print_with_timestamp(f"Fold {fold +1} Best Metrics: Accuracy: {best_val_acc:.4f}, Precision: {best_val_precision:.4f}, F1 Score: {best_val_f1:.4f}")
         # # Load the best model state
         # model.load_state_dict(best_model_state)
