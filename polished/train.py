@@ -7,7 +7,8 @@ from sklearn.metrics import f1_score, accuracy_score, precision_score, confusion
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.model_selection import StratifiedKFold, train_test_split, StratifiedShuffleSplit
 from torch_geometric.loader import DataLoader
-from dataset import BrainDataset, VanillaDataset, Dataset_PPMI
+from dataset import VanillaDataset, Dataset_PPMI, PPMIBrainDataset
+from torch.utils.data import WeightedRandomSampler
 
 from torch.utils.data import TensorDataset, Subset
 
@@ -23,6 +24,16 @@ from preprocessing import process
 def print_with_timestamp(message):
     timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     print(f"{timestamp}\t{message}")
+
+# def resample_dataset(dataset, labels):
+#     label_counts = np.bincount(labels)
+#     # Creating weights for each sample in the dataset based on their label
+#     weights = 1. / label_counts[labels]
+#     sampler = WeightedRandomSampler(weights, len(weights), replacement=True)
+
+#     # Use the sampler in the DataLoader to perform upsampling or downsampling
+#     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, sampler=sampler)
+#     return loader
 
 def plot_confusion_matrix(cm, class_names):
     figure = plt.figure(figsize=(8, 8))
@@ -83,7 +94,7 @@ def train(args, device):
     val_size = args.test_size
     dataset = args.dataset
     n_nodes = 116
-    edge_dim = 5
+    edge_dim = 3
     out_dim = 4
     # Cross-validation setup
     skf = StratifiedKFold(n_splits=n_folds, random_state=seed, shuffle=True)
@@ -149,7 +160,7 @@ def train(args, device):
         #     augmented_train_dataset = BrainDataset(augmented_train_data)
         #     val_dataset = BrainDataset(processed_val_data)
             # test_dataset = BrainDataset(processed_test_data)
-        edge_dim = 1
+        edge_dim = 3
         # Extract labels from each dataset
         train_labels = [data.y.item() for data in train_data]
         val_labels = [data.y.item() for data in val_data]
@@ -157,6 +168,9 @@ def train(args, device):
 
         # Calculate label distributions
         train_label_distribution = np.bincount(train_labels)
+        # sampling_weights = 1./train_label_distribution[train_labels]
+        # sampler = WeightedRandomSampler(sampling_weights, len(sampling_weights), replacement=True)
+
         val_label_distribution = np.bincount(val_labels)
         # test_label_distribution = np.bincount(test_labels)
 
@@ -165,7 +179,7 @@ def train(args, device):
         print_with_timestamp(f"Validation labels distribution: {val_label_distribution}")
         # print_with_timestamp(f"Test labels distribution: {test_label_distribution}")
 
-        train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, generator=generator)
+        train_loader = DataLoader(train_data, batch_size=batch_size, generator=generator, shuffle=True)
         
         val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, generator=generator)
         
@@ -177,11 +191,11 @@ def train(args, device):
 
         model = get_model(args, edge_dim).to(device)
         optimizer = torch.optim.Adam(model.parameters(), weight_decay=0.0005, lr=learning_rate)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=patience//2)
+        # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=patience//2)
 
         # Class weights
         class_weights = compute_class_weight('balanced', classes=np.unique(train_labels), y=train_labels)
-        class_weights = torch.tensor([2.0, 1.0, 1.0, 2.0], dtype=torch.float).to(device)
+        # class_weights = torch.tensor([10.0, 1.0, 3.0, 10.0], dtype=torch.float).to(device)
         # class_weights[0] = class_weights[0] *2      # Adjust the weight for the first class
         # class_weights[1] = class_weights[0] *2      # Adjust the weight for the first class
         # class_weights[3] = class_weights[3] *2  # Adjust the weight for the first class
@@ -194,6 +208,7 @@ def train(args, device):
         best_val_f1 = 0
         best_val_precision = 0
         patience_counter = 0
+        best_confusion_matrix = None
 
         for epoch in range(epochs):
             model.train()
@@ -249,10 +264,12 @@ def train(args, device):
             val_precision = precision_score(val_labels, val_preds, average='weighted', zero_division=0)
             conf_matrix = confusion_matrix(val_labels, val_preds)
 
+
             writer.add_scalar(f'Fold_{fold+1}/Metrics/Val_Loss', val_loss, epoch)
             writer.add_scalar(f'Fold_{fold+1}/Metrics/Val_Accuracy', val_accuracy, epoch)
             writer.add_scalar(f'Fold_{fold+1}/Metrics/Val_F1', val_f1, epoch)
             writer.add_scalar(f'Fold_{fold+1}/Metrics/Val_Precision', val_precision, epoch)
+            
 
             print_with_timestamp(f"Epoch {epoch + 1}/{epochs}\t||\tTrain Loss: {train_loss:.4f}\t|\tVal Loss: {val_loss:.4f}\t|\tAccuracy: {val_accuracy:.4f}\t|\tF1-Score: {val_f1:.4f}")
 
@@ -269,11 +286,12 @@ def train(args, device):
                 best_val_acc = val_accuracy
                 best_val_f1 = val_f1
                 best_val_precision = val_precision
+                best_confusion_matrix = conf_matrix
                 best_model_state = model.state_dict()
             
-            writer.add_scalar(f'Fold_{fold+1}/LR', optimizer.param_groups[0]['lr'], epoch)
+            # writer.add_scalar(f'Fold_{fold+1}/LR', optimizer.param_groups[0]['lr'], epoch)
             # Step the scheduler after each epoch
-            scheduler.step(metrics=val_loss)
+            # scheduler.step(metrics=val_loss)
             # for name, param in model.named_parameters():
             #     if param.grad is not None:
             #         print_with_timestamp(f"{name} has gradient")
@@ -283,6 +301,7 @@ def train(args, device):
         
         print_with_timestamp(f"Fold {fold +1} Best Validation Loss: {best_val_loss:.4f}")
         print_with_timestamp(f"Fold {fold +1} Best Metrics: Accuracy: {best_val_acc:.4f}, Precision: {best_val_precision:.4f}, F1 Score: {best_val_f1:.4f}")
+        print_with_timestamp(f"Fold {fold +1} Best Confusion Matrix:\n{best_confusion_matrix}")
         # # Load the best model state
         # model.load_state_dict(best_model_state)
         

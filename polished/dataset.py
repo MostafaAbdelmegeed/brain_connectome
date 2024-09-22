@@ -77,131 +77,176 @@ class VanillaDataset(Dataset):
         return data
 
 
-class BrainDataset(Dataset):
-    def __init__(self, data):
-        self.connectivities = data['connectivity']
-        self.node_adjacencies = data['node_adj']
-        self.edge_adjacencies = data['edge_adj']
-        self.transition = data['transition']
-        self.labels = data['label']
-        self.node_num = self.connectivities[0].shape[0]
-        self.left_indices, self.right_indices = self.get_hemisphere_indices()
-    
-    def get_hemisphere_indices(self):
-        left_indices = [i for i in range(self.node_num) if i % 2 == 0]
-        right_indices = [i for i in range(self.node_num) if i % 2 != 0]
-        return left_indices, right_indices
+class PPMIBrainDataset(Dataset):
+    def __init__(self, root_dir):
+        super(PPMIBrainDataset, self).__init__()
+        self.root_dir = root_dir
+        self.data = []
+        self.labels = []
+        self.load_data()
 
-    def isInter(self, i, j):
-        return (i in self.left_indices and j in self.right_indices) or (i in self.right_indices and j in self.left_indices)
+    def load_data(self):
+        sentence_sizes = []
+        for subdir, _, files in os.walk(self.root_dir):
+            for file in files:
+                if 'AAL116_features_timeseries' in file:
+                    file_path = os.path.join(subdir, file)
+                    data = loadmat(file_path)
+                    features = data['data']
+                    sentence_sizes.append(features.shape[0]) 
+                    label = self.get_label(subdir)
+                    self.data.append(features)
+                    self.labels.append(label)
 
-    def isLeftIntra(self, i, j):
-        return i in self.left_indices and j in self.left_indices
-
-    def isRightIntra(self, i, j):
-        return i in self.right_indices and j in self.right_indices
-
-    def isHomo(self, i, j):
-        return i // 2 == j // 2 and abs(i - j) == 1
-    
-    def node_count(self):
-        return self.node_num
-
-    def edge_count(self):
-        return self.edge_adjacencies[0].shape[0]
-    
-    def unique_labels(self):
-        return torch.unique(self.labels)
-    
-    def num_classes(self):
-        return len(self.unique_labels())
-    
-    def edge_attr_dim(self):
-        return 5
-
+    def get_label(self, subdir):
+        if 'control' in subdir:
+            return 0
+        elif 'patient' in subdir:
+            return 1
+        elif 'prodromal' in subdir:
+            return 2
+        elif 'swedd' in subdir:
+            return 3
+        else:
+            print("Label error")
+            return -1  
+        
     def __len__(self):
-        return len(self.connectivities)
+        return len(self.data)
 
     def __getitem__(self, idx):
-        connectivity = self.connectivities[idx]
-        node_adj = self.node_adjacencies[idx]
-        edge_adj = self.edge_adjacencies[idx]
-        transition = self.transition[idx]
+        data = self.data[idx]
         label = self.labels[idx]
+        data = torch.corrcoef(torch.tensor(data).squeeze().T)
+        data = torch.nan_to_num(data)
+        edge_index, edge_attr = from_scipy_sparse_matrix(sp.coo_matrix(data))
+        data = Data(x=data.float(), edge_index=edge_index, edge_attr=edge_attr, y=torch.tensor(label))
+        return data
+# class BrainDataset(Dataset):
+#     def __init__(self, data):
+#         self.connectivities = data['connectivity']
+#         self.node_adjacencies = data['node_adj']
+#         self.edge_adjacencies = data['edge_adj']
+#         self.transition = data['transition']
+#         self.labels = data['label']
+#         self.node_num = self.connectivities[0].shape[0]
+#         self.left_indices, self.right_indices = self.get_hemisphere_indices()
+    
+#     def get_hemisphere_indices(self):
+#         left_indices = [i for i in range(self.node_num) if i % 2 == 0]
+#         right_indices = [i for i in range(self.node_num) if i % 2 != 0]
+#         return left_indices, right_indices
 
-        # Ensure coalesced
-        edge_adj = edge_adj.coalesce()
-        transition = transition.coalesce()
-        num_nodes = connectivity.shape[0]
+#     def isInter(self, i, j):
+#         return (i in self.left_indices and j in self.right_indices) or (i in self.right_indices and j in self.left_indices)
 
-        # Initialize lists for edge_index and edge_attr
-        edge_index = []
-        edge_attr = []
+#     def isLeftIntra(self, i, j):
+#         return i in self.left_indices and j in self.left_indices
 
-        # Initialize node degree, strength, and hemisphere indicator tensors
-        node_degree = torch.zeros(num_nodes, dtype=torch.float)
-        node_strength = torch.zeros(num_nodes, dtype=torch.float)
-        hemisphere_indicator = torch.zeros(num_nodes, dtype=torch.float)
-        hemisphere_indicator[self.right_indices] = 1.0  # Right hemisphere nodes get 1.0
+#     def isRightIntra(self, i, j):
+#         return i in self.right_indices and j in self.right_indices
 
-        # Build adjacency list for clustering coefficient
-        adjacency_list = [[] for _ in range(num_nodes)]
-        # print(f'Connectivity min: {connectivity.min()}, max: {connectivity.max()}')
-        # Populate edge_index, edge_attr, and compute node features
-        for j in range(num_nodes):
-            for k in range(num_nodes):
-                if node_adj[j, k] == 0:
-                    continue
-                edge_index.append([j, k])
-                edge_attr.append([
-                    connectivity[j, k],
-                    self.isInter(j, k),
-                    self.isLeftIntra(j, k),
-                    self.isRightIntra(j, k),
-                    self.isHomo(j, k)
-                ])
-                # Update node degree and strength
-                node_degree[j] += 1
-                node_strength[j] += connectivity[j, k]
-                adjacency_list[j].append(k)
+#     def isHomo(self, i, j):
+#         return i // 2 == j // 2 and abs(i - j) == 1
+    
+#     def node_count(self):
+#         return self.node_num
 
-        # Compute clustering coefficient for each node (optional)
-        node_clustering = torch.zeros(num_nodes, dtype=torch.float)
-        for i in range(num_nodes):
-            neighbors = adjacency_list[i]
-            if len(neighbors) < 2:
-                node_clustering[i] = 0.0
-            else:
-                links = 0
-                for u in neighbors:
-                    for v in neighbors:
-                        if u != v and node_adj[u, v]:
-                            links += 1
-                node_clustering[i] = links / (len(neighbors) * (len(neighbors) - 1))
+#     def edge_count(self):
+#         return self.edge_adjacencies[0].shape[0]
+    
+#     def unique_labels(self):
+#         return torch.unique(self.labels)
+    
+#     def num_classes(self):
+#         return len(self.unique_labels())
+    
+#     def edge_attr_dim(self):
+#         return 5
+
+#     def __len__(self):
+#         return len(self.connectivities)
+
+#     def __getitem__(self, idx):
+#         connectivity = self.connectivities[idx]
+#         node_adj = self.node_adjacencies[idx]
+#         edge_adj = self.edge_adjacencies[idx]
+#         transition = self.transition[idx]
+#         label = self.labels[idx]
+
+#         # Ensure coalesced
+#         edge_adj = edge_adj.coalesce()
+#         transition = transition.coalesce()
+#         num_nodes = connectivity.shape[0]
+
+#         # Initialize lists for edge_index and edge_attr
+#         edge_index = []
+#         edge_attr = []
+
+#         # Initialize node degree, strength, and hemisphere indicator tensors
+#         node_degree = torch.zeros(num_nodes, dtype=torch.float)
+#         node_strength = torch.zeros(num_nodes, dtype=torch.float)
+#         hemisphere_indicator = torch.zeros(num_nodes, dtype=torch.float)
+#         hemisphere_indicator[self.right_indices] = 1.0  # Right hemisphere nodes get 1.0
+
+#         # Build adjacency list for clustering coefficient
+#         adjacency_list = [[] for _ in range(num_nodes)]
+#         # print(f'Connectivity min: {connectivity.min()}, max: {connectivity.max()}')
+#         # Populate edge_index, edge_attr, and compute node features
+#         for j in range(num_nodes):
+#             for k in range(num_nodes):
+#                 if node_adj[j, k] == 0:
+#                     continue
+#                 edge_index.append([j, k])
+#                 edge_attr.append([
+#                     connectivity[j, k],
+#                     self.isInter(j, k),
+#                     self.isLeftIntra(j, k),
+#                     self.isRightIntra(j, k),
+#                     self.isHomo(j, k)
+#                 ])
+#                 # Update node degree and strength
+#                 node_degree[j] += 1
+#                 node_strength[j] += connectivity[j, k]
+#                 adjacency_list[j].append(k)
+
+#         # Compute clustering coefficient for each node (optional)
+#         node_clustering = torch.zeros(num_nodes, dtype=torch.float)
+#         for i in range(num_nodes):
+#             neighbors = adjacency_list[i]
+#             if len(neighbors) < 2:
+#                 node_clustering[i] = 0.0
+#             else:
+#                 links = 0
+#                 for u in neighbors:
+#                     for v in neighbors:
+#                         if u != v and node_adj[u, v]:
+#                             links += 1
+#                 node_clustering[i] = links / (len(neighbors) * (len(neighbors) - 1))
 
         
-        # Separate continuous and binary features
-        node_features = torch.stack([
-            node_degree,
-            node_strength,
-            node_clustering
-        ], dim=1)
+#         # Separate continuous and binary features
+#         node_features = torch.stack([
+#             node_degree,
+#             node_strength,
+#             node_clustering
+#         ], dim=1)
 
-        # Convert lists to tensors
-        edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
-        edge_attr = torch.tensor(edge_attr, dtype=torch.float)
+#         # Convert lists to tensors
+#         edge_index = torch.tensor(edge_index, dtype=torch.long).t().contiguous()
+#         edge_attr = torch.tensor(edge_attr, dtype=torch.float)
 
-        data = Data(
-            x=node_features,
-            edge_index=edge_index,
-            edge_attr=edge_attr,
-            y=label.type(torch.long),
-            num_nodes=num_nodes,
-            node_adj=node_adj,
-            edge_adj=edge_adj,
-            transition=transition
-        )
-        return data
+#         data = Data(
+#             x=node_features,
+#             edge_index=edge_index,
+#             edge_attr=edge_attr,
+#             y=label.type(torch.long),
+#             num_nodes=num_nodes,
+#             node_adj=node_adj,
+#             edge_adj=edge_adj,
+#             transition=transition
+#         )
+#         return data
 
 
 # def pad_edge_index(edge_index, max_edges):

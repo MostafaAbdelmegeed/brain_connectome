@@ -187,3 +187,5 @@ def add_attributes2(edges, K):
         y[y==0] = 0.5
         y = torch.log(y)
     return y
+
+
