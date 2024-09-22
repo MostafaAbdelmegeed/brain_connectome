@@ -177,7 +177,7 @@ def train(args, device):
 
         model = get_model(args, edge_dim).to(device)
         optimizer = torch.optim.Adam(model.parameters(), weight_decay=0.0005, lr=learning_rate)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.6, patience=patience//4)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=patience//2)
 
         # Class weights
         class_weights = compute_class_weight('balanced', classes=np.unique(train_labels), y=train_labels)
