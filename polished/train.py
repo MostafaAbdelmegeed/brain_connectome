@@ -271,7 +271,7 @@ def train(args, device):
                 best_val_precision = val_precision
                 best_model_state = model.state_dict()
             
-            writer.add_scalar(f'Fold_{fold+1}/LR', scheduler.get_last_lr(), epoch)
+            writer.add_scalar(f'Fold_{fold+1}/LR', optimizer.param_groups[0]['lr'], epoch)
             # Step the scheduler after each epoch
             scheduler.step(metrics=val_loss)
             # for name, param in model.named_parameters():
