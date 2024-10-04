@@ -425,7 +425,7 @@ class Dataset_ADNI(TorchDataset):
             sentence_sizes = []
         labels_df = pd.read_csv(self.label_file, header=0)
         if self.num_classes == 4:
-            labels_id = {'CN': 0, 'SMC': 1, 'EMCI': 2, 'LMCI': 2, 'AD': 3}
+            labels_id = {'CN': 0, 'SMC': 0, 'EMCI': 1, 'LMCI': 2, 'AD': 3}
         elif self.num_classes == 2:
             labels_id = {'CN': 0, 'SMC': 0, 'EMCI': 0, 'LMCI': 1, 'AD': 1}
         for filename in os.listdir(self.data_dir):
@@ -467,7 +467,7 @@ class ADNIAsymmetryDataset(TorchDataset):
         sentence_sizes = []
         labels_df = pd.read_csv(self.label_file, header=0)
         if self.num_classes == 4:
-            labels_id = {'CN': 0, 'SMC': 1, 'EMCI': 2, 'LMCI': 2, 'AD': 3}
+            labels_id = {'CN': 0, 'SMC': 0, 'EMCI': 1, 'LMCI': 2, 'AD': 3}
         elif self.num_classes == 2:
             labels_id = {'CN': 0, 'SMC': 0, 'EMCI': 0, 'LMCI': 1, 'AD': 1}
         for filename in os.listdir(self.data_dir):
