@@ -95,12 +95,12 @@ def augment_minority_class(connectivity, original_connectivity, num_augments=1, 
     # print(f'--------- Number of edges in source: {torch.sum(abs_conn > 0)}')
     for _ in range(num_augments):
         randomized_span = random.uniform(-span, 0)
-        
         # Generate the threshold based on the original connectivity matrix
         lower_threshold = torch.quantile(abs_original_conn, percentile+randomized_span*2)
         # print(f'Lower percentile: {percentile+randomized_span}, lower_threshold: {lower_threshold}')
         upper_threshold = torch.quantile(abs_original_conn, 1.0+randomized_span)
         # print(f'Upper percentile: {1.0+randomized_span}, upper_threshold: {upper_threshold}')
+        print(f'Min value: {torch.min(abs_original_conn)}, Lower threshold: {lower_threshold}, Upper threshold: {upper_threshold}, Max value: {torch.max(abs_original_conn)}')
 
         # Generate all possible (i, j) pairs excluding self-loops (i == j)
         indices = [(i, j) for i in range(connectivity.size(0)) for j in range(i+1, connectivity.size(1))]
@@ -168,20 +168,20 @@ def process(dataloader, device, percentile=0.9, span=0.04, augment=False):
         # Generate original and augmented samples
         # new_conn, n_adj, e_adj, t = coembed_pipeline(connectivity, device=device, percentile=percentile)
         new_conn = coembed_pipeline(connectivity, device=device, percentile=percentile)
-        new_connectivity_list.append(new_conn.cpu())
+        new_connectivity_list.append(new_conn)
         # node_adj_list.append(n_adj.cpu())
         # edge_adj_list.append(e_adj.cpu())
         # trans_list.append(t.cpu())
-        label_list.append(label.cpu())
+        label_list.append(label)
         
 
         # Augment if this is a minority class sample and it needs more samples
         if augment and (label_counts[label.item()] < target_count):
             augmented_connectivities = augment_minority_class(new_conn, connectivity, num_augments=n_augments[label.item()], device=device, percentile=percentile, span=span)
             for aug_conn in augmented_connectivities:
-                aug_n_adj = node_adjacency_matrix(aug_conn).to(device)
-                aug_e_adj = edge_adjacency_matrix(aug_n_adj, device)
-                aug_t = transition_matrix(aug_n_adj, device)
+                # aug_n_adj = node_adjacency_matrix(aug_conn).to(device)
+                # aug_e_adj = edge_adjacency_matrix(aug_n_adj, device)
+                # aug_t = transition_matrix(aug_n_adj, device)
                 
                 new_connectivity_list.append(aug_conn.cpu())
                 # node_adj_list.append(aug_n_adj.cpu())

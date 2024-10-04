@@ -11,6 +11,7 @@ __pycache__/
 build/
 runs/
 data/*
+polished/summarized_logs/*
 develop-eggs/
 dist/
 downloads/
@@ -30,6 +31,7 @@ MANIFEST
 
 *.out
 *.pth
+*.xlsx
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

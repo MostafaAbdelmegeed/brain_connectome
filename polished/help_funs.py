@@ -56,11 +56,14 @@ def add_structural_features(edge_index, edge_attr):
     return edge_attr
 
 
-def pearson_dataset(data, label, sparsity):
+def pearson_dataset(data, label, sparsity, mgnn=False):
     adjacency_matrix = preprocess_adjacency_matrix(data, sparsity)
-    # Add structural features to edges (Interhemispheric/Intrahemispheric, Homotopic)
-    edge_index, edge_attr = adjacency_matrix
-    edge_attr = add_structural_features(edge_index, edge_attr)
+    edge_index = adjacency_matrix[0]
+    edge_attr = adjacency_matrix[1]
+    if mgnn:
+        moment_attrs = add_attributes2(edge_index, 10)
+        data = Data(x=torch.cat((data,moment_attrs), dim=1).float(), edge_index=edge_index, edge_attr=edge_attr, y=torch.tensor(label))
+        return data
     data = Data(x=data.float(), edge_index=edge_index, edge_attr=edge_attr, y=torch.tensor(label))
     return data
 
@@ -82,11 +85,11 @@ Kanatsoulis, C., & Ribeiro, A. (2023, October).
 Counting Graph Substructures with Graph Neural Networks. 
 In The Twelfth International Conference on Learning Representations.
 '''
-def add_attributes2(edges, K):
-    S = to_torch_coo_tensor(edges)
+def add_attributes2(edges, K, device='cpu'):
+    S = to_torch_coo_tensor(edges).to(device)
     N = S.shape[0]
-    deg_k = torch.zeros(N,K)
-    diag_k = torch.zeros(N,K-2)
+    deg_k = torch.zeros(N,K, device=device)
+    diag_k = torch.zeros(N,K-2, device=device)
     x = S
     for k in range(K):
         deg_k[:,k] = torch.sparse.sum(x,1).to_dense()
@@ -97,16 +100,16 @@ def add_attributes2(edges, K):
         x = torch.sparse.mm(S, x)
 
     if K > 9:
-        new = torch.zeros(N,27)
+        new = torch.zeros(N,27, device=device)
     elif K > 8:
-        new = torch.zeros(N,22)
+        new = torch.zeros(N,22, device=device)
     elif K > 7:
-        new = torch.zeros(N,16)
+        new = torch.zeros(N,16, device=device)
     elif K > 5:
-        new = torch.zeros(N,7)
+        new = torch.zeros(N,7, device=device)
 
     if K > 5:
-        I = torch.eye(N).to_sparse()
+        I = torch.eye(N).to_sparse().to(device)
         S2 = torch.sparse.mm(S, S)
         S3 = torch.sparse.mm(S, S2)
 
@@ -187,5 +190,8 @@ def add_attributes2(edges, K):
         y[y==0] = 0.5
         y = torch.log(y)
     return y
+
+
+
 
 

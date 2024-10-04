@@ -6,7 +6,7 @@ import argparse
 import torch
 import numpy as np
 
-# python -u polished/main.py --dataset ppmi --seed 0 --n_folds 2 --epochs 5 -- patience 5 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.3 --heads 1 --test_size 0.1 --percentile 0.9 --model gin --gpu_id 0 
+# python -u polished/main.py --dataset ppmi --seed 0 --n_folds 2 --epochs 5 --patience 5 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.3 --heads 1 --test_size 0.1 --percentile 0.9 --model gin --gpu_id 0 
 def print_with_timestamp(message):
     timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     print(f"{timestamp}\t{message}")
@@ -15,11 +15,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train GNN on connectivity data")
     parser.add_argument('--gpu_id', type=int, default=0, help='GPU ID to use')
     parser.add_argument('--dataset', type=str, default='ppmi', help='Name of the dataset')
-    parser.add_argument('--seed', type=int, default=10, help='Random seed')
-    parser.add_argument('--n_folds', type=int, default=5, help='Number of folds for cross-validation')
-    parser.add_argument('--epochs', type=int, default=30, help='Number of epochs')
-    parser.add_argument('--batch_size', type=int, default=1, help='Batch size')
-    parser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate')
+    parser.add_argument('--seed', type=int, default=0, help='Random seed')
+    parser.add_argument('--n_folds', type=int, default=10, help='Number of folds for cross-validation')
+    parser.add_argument('--epochs', type=int, default=300, help='Number of epochs')
+    parser.add_argument('--batch_size', type=int, default=64, help='Batch size')
+    parser.add_argument('--learning_rate', type=float, default=0.0001, help='Learning rate')
     parser.add_argument('--hidden_dim', type=int, default=64, help='Hidden dimension size')
     parser.add_argument('--n_layers', type=int, default=1, help='Number of layers')
     parser.add_argument('--dropout', type=float, default=0.5, help='Dropout rate')
@@ -34,6 +34,11 @@ def parse_args():
     parser.add_argument('--vanilla', action='store_true', help='Use vanilla dataset')
     parser.add_argument('--exp_code', type=str, default='-', help='Experiment code')
     parser.add_argument('--run_name', type=str, default='', help='Run name')
+    parser.add_argument('--edge_dim', type=int, default=1, help='Edge feature dimension')
+    parser.add_argument('--in_channels', type=int, default=1, help='Input channel size')
+    parser.add_argument('--mgnn', action='store_true', help='Use MGNN')
+    parser.add_argument('--num_classes', type=int, default=4, help='Number of classes')
+    parser.add_argument('--mode', type=str, default='corr', help='Mode', choices=['corr', 'asym'])
     return parser.parse_args()
 
 
