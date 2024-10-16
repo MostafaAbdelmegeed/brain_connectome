@@ -113,22 +113,16 @@ def train(args, device):
     dropout = args.dropout
     patience = args.patience
     heads = args.heads
-    augmenation_span = args.span
     n_layers = args.n_layers
-    val_size = args.test_size
     dataset = args.dataset
-    n_nodes = 116
-    edge_dim = args.edge_dim
-    out_dim = 4
-    mgnn = args.mgnn
     # Cross-validation setup
     skf = StratifiedKFold(n_splits=n_folds, random_state=seed, shuffle=True)
     # Initialize lists to store metrics for all folds
-    all_fold_metrics = {'accuracy': [], 'precision': [], 'f1': [], 'conf_matrix':[], 'val_loss': []}
+    all_fold_metrics = {'accuracy': [], 'precision': [], 'f1': [], 'conf_matrix':[], 'val_loss': [], 'weights': []}
 
-    if args.mode == 'corr':
+    if args.mode == 'corr' or args.mode == 'func':
         dataset = Dataset_PPMI('data/PPMI') if args.dataset == 'ppmi' else Dataset_ADNI('data/ADNI/AAL90', 'data/ADNI/label-2cls_new.csv', args.num_classes)
-    elif args.mode == 'asym':
+    elif args.mode == 'asym' or args.mode == 'all':
         dataset = PPMIAsymmetryDataset('data/PPMI') if args.dataset == 'ppmi' else ADNIAsymmetryDataset('data/ADNI/AAL90', 'data/ADNI/label-2cls_new.csv', args.num_classes)
     # Get the current timestamp
     timestamp = datetime.datetime.now().strftime("%m-%d-%H-%M-%S")
@@ -181,7 +175,7 @@ def train(args, device):
             for data in train_loader:
                 data = data.to(device)
                 optimizer.zero_grad()
-                output = model(data)
+                output, _ = model(data)
                 loss = criterion(output, data.y)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -205,11 +199,13 @@ def train(args, device):
             val_total = 0
             val_preds = []
             val_labels = []
+            interpretable_weights= []
             
             with torch.no_grad():
                 for data in val_loader:
                     data = data.to(device)
-                    output = model(data)
+                    output, weights = model(data)
+                    interpretable_weights.append(weights)
                     loss = criterion(output, data.y)
                     val_loss += loss.item()
                     preds = output.argmax(dim=1)
@@ -217,6 +213,7 @@ def train(args, device):
                     val_total += data.y.size(0)
                     val_preds.extend(preds.cpu().numpy())
                     val_labels.extend(data.y.cpu().numpy())
+            
 
             val_loss /= len(val_loader)
             val_accuracy = val_correct / val_total
@@ -253,7 +250,8 @@ def train(args, device):
         
         print_with_timestamp(f"Fold {fold +1} Best Validation Loss: {best_val_loss:.4f}")
         print_with_timestamp(f"Fold {fold +1} Best Metrics: Accuracy: {best_val_acc:.4f}, Precision: {best_val_precision:.4f}, F1 Score: {best_val_f1:.4f}")
-        print_with_timestamp(f"Fold {fold +1} Best Confusion Matrix:\n{best_confusion_matrix}")
+        best_conf_matrix_str = np.array2string(best_confusion_matrix, separator=' ', max_line_width=np.inf).replace('\n', ' ')
+        print_with_timestamp(f"Fold {fold +1} Best Confusion Matrix: {best_conf_matrix_str}")
 
         # Store metrics for the current fold
         all_fold_metrics['accuracy'].append(best_val_acc)
@@ -261,12 +259,14 @@ def train(args, device):
         all_fold_metrics['f1'].append(best_val_f1)
         all_fold_metrics['conf_matrix'].append(conf_matrix)
         all_fold_metrics['val_loss'].append(best_val_loss)
+        all_fold_metrics['weights'].append(torch.cat(interpretable_weights).mean(dim=0))
 
         # Print average metrics until the latest fold
         avg_accuracy = np.mean(all_fold_metrics['accuracy'])
         avg_precision = np.mean(all_fold_metrics['precision'])
         avg_f1 = np.mean(all_fold_metrics['f1'])
         avg_val_loss = np.mean(all_fold_metrics['val_loss'])
+        
         print_with_timestamp(f"Average Metrics until Fold {fold + 1}: Accuracy: {avg_accuracy:.4f}, Precision: {avg_precision:.4f}, F1 Score: {avg_f1:.4f}")
         print_with_timestamp(f"Average Lowest Validation Loss until Fold {fold + 1}: {avg_val_loss:.4f}")
 
@@ -274,13 +274,19 @@ def train(args, device):
     final_accuracy = np.mean(all_fold_metrics['accuracy'])
     final_precision = np.mean(all_fold_metrics['precision'])
     final_f1 = np.mean(all_fold_metrics['f1'])
+    
 
     print_with_timestamp("Training completed.")
     print_with_timestamp(f"Final Metrics | Accuracy: {final_accuracy:.4f} | Precision: {final_precision:.4f} | F1 Score: {final_f1:.4f}")
 
     # Print the average confusion matrix
     avg_conf_matrix = np.mean(all_fold_metrics['conf_matrix'], axis=0)
-    print_with_timestamp(f"Final Confusion Matrix:\n{avg_conf_matrix}")
+    avg_conf_matrix_str = np.array2string(avg_conf_matrix, separator=' ', max_line_width=np.inf).replace('\n', ' ')
+    print_with_timestamp(f"Final Confusion Matrix: {avg_conf_matrix_str}")
+
+
+    final_weights = torch.stack(all_fold_metrics['weights']).mean(dim=0)
+    print_with_timestamp(f"Final Weights: {final_weights}")
     # Define class names based on your specific classes
     if args.dataset == 'ppmi':
         class_names = ['Control', 'Prodromal', 'Patient', 'Swedd']

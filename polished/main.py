@@ -38,7 +38,8 @@ def parse_args():
     parser.add_argument('--in_channels', type=int, default=1, help='Input channel size')
     parser.add_argument('--mgnn', action='store_true', help='Use MGNN')
     parser.add_argument('--num_classes', type=int, default=4, help='Number of classes')
-    parser.add_argument('--mode', type=str, default='corr', help='Mode', choices=['corr', 'asym'])
+    parser.add_argument('--mode', type=str, default='corr', help='Mode', choices=['corr', 'asym', 'func', 'all'])
+    parser.add_argument('--network', type=str, default='yeo7', help='Network', choices=['yeo17', 'yeo7'])
     return parser.parse_args()
 
 
@@ -49,6 +50,7 @@ def main():
     seed = args.seed
     np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.set_printoptions(threshold=torch.inf)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
         device = torch.device('cuda:{}'.format(args.gpu_id))
