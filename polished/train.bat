@@ -2,28 +2,29 @@
 setlocal enabledelayedexpansion
 
 rem List of run names
-set run_names[0]=gcn_add_s0_ppmi_all_yeo17
-set run_names[1]=gcn_add_s1_ppmi_all_yeo17
-set run_names[2]=gcn_add_s2_ppmi_all_yeo17
-set run_names[3]=gcn_add_s3_ppmi_all_yeo17
-set run_names[4]=gcn_add_s4_ppmi_all_yeo17
-set run_names[5]=gat_add_s0_ppmi_all_yeo17
-set run_names[6]=gat_add_s1_ppmi_all_yeo17
-set run_names[7]=gat_add_s2_ppmi_all_yeo17
-set run_names[8]=gat_add_s3_ppmi_all_yeo17
-set run_names[9]=gat_add_s4_ppmi_all_yeo17
+set run_names[0]=gps_s1_ppmi_asym_yeo7
+set run_names[1]=gps_s2_ppmi_asym_yeo7
+set run_names[2]=gps_s3_ppmi_asym_yeo7
+set run_names[3]=gps_s4_ppmi_asym_yeo7
+set run_names[4]=gps_s0_ppmi_func_yeo7
+set run_names[5]=gps_s1_ppmi_func_yeo7
+set run_names[6]=gps_s2_ppmi_func_yeo7
+set run_names[7]=gps_s3_ppmi_func_yeo7
+set run_names[8]=gps_s4_ppmi_func_yeo7
+
 
 rem List of commands to run
-set cmds[0]=python -u polished/main.py --dataset ppmi --seed 0 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --in_channels 58 --dropout 0.7 --model gcn --gpu_id 0 --num_classes 4 --mode asym --network yeo17 --run_name gcn_add_s0_ppmi_all_yeo17
-set cmds[1]=python -u polished/main.py --dataset ppmi --seed 1 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --in_channels 58 --dropout 0.7 --model gcn --gpu_id 0 --num_classes 4 --mode asym --network yeo17 --run_name gcn_add_s1_ppmi_all_yeo17
-set cmds[2]=python -u polished/main.py --dataset ppmi --seed 2 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --in_channels 58 --dropout 0.7 --model gcn --gpu_id 0 --num_classes 4 --mode asym --network yeo17 --run_name gcn_add_s2_ppmi_all_yeo17
-set cmds[3]=python -u polished/main.py --dataset ppmi --seed 3 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --in_channels 58 --dropout 0.7 --model gcn --gpu_id 0 --num_classes 4 --mode asym --network yeo17 --run_name gcn_add_s3_ppmi_all_yeo17
-set cmds[4]=python -u polished/main.py --dataset ppmi --seed 4 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --in_channels 58 --dropout 0.7 --model gcn --gpu_id 0 --num_classes 4 --mode asym --network yeo17 --run_name gcn_add_s4_ppmi_all_yeo17
-set cmds[5]=python -u polished/main.py --dataset ppmi --seed 0 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --in_channels 58 --dropout 0.7 --model gat --gpu_id 0 --num_classes 4 --mode asym --network yeo17 --run_name gat_add_s0_ppmi_all_yeo17
-set cmds[6]=python -u polished/main.py --dataset ppmi --seed 1 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --in_channels 58 --dropout 0.7 --model gat --gpu_id 0 --num_classes 4 --mode asym --network yeo17 --run_name gat_add_s1_ppmi_all_yeo17
-set cmds[7]=python -u polished/main.py --dataset ppmi --seed 2 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --in_channels 58 --dropout 0.7 --model gat --gpu_id 0 --num_classes 4 --mode asym --network yeo17 --run_name gat_add_s2_ppmi_all_yeo17
-set cmds[8]=python -u polished/main.py --dataset ppmi --seed 3 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --in_channels 58 --dropout 0.7 --model gat --gpu_id 0 --num_classes 4 --mode asym --network yeo17 --run_name gat_add_s3_ppmi_all_yeo17
-set cmds[9]=python -u polished/main.py --dataset ppmi --seed 4 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --in_channels 58 --dropout 0.7 --model gat --gpu_id 0 --num_classes 4 --mode asym --network yeo17 --run_name gat_add_s4_ppmi_all_yeo17
+set cmds[0]=python -u polished/main.py --dataset ppmi --seed 1 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.7 --model gps --gpu_id 0 --mode asym --heads 4 --network yeo7 --run_name gps_s1_ppmi_asym_yeo7
+set cmds[1]=python -u polished/main.py --dataset ppmi --seed 2 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.7 --model gps --gpu_id 0 --mode asym --heads 4 --network yeo7 --run_name gps_s2_ppmi_asym_yeo7
+set cmds[2]=python -u polished/main.py --dataset ppmi --seed 3 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.7 --model gps --gpu_id 0 --mode asym --heads 4 --network yeo7 --run_name gps_s3_ppmi_asym_yeo7
+set cmds[3]=python -u polished/main.py --dataset ppmi --seed 4 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.7 --model gps --gpu_id 0 --mode asym --heads 4 --network yeo7 --run_name gps_s4_ppmi_asym_yeo7
+set cmds[4]=python -u polished/main.py --dataset ppmi --seed 0 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.7 --model gps --gpu_id 0 --mode func --heads 4 --network yeo7 --run_name gps_s0_ppmi_func_yeo7
+set cmds[5]=python -u polished/main.py --dataset ppmi --seed 1 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.7 --model gps --gpu_id 0 --mode func --heads 4 --network yeo7 --run_name gps_s1_ppmi_func_yeo7
+set cmds[6]=python -u polished/main.py --dataset ppmi --seed 2 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.7 --model gps --gpu_id 0 --mode func --heads 4 --network yeo7 --run_name gps_s2_ppmi_func_yeo7
+set cmds[7]=python -u polished/main.py --dataset ppmi --seed 3 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.7 --model gps --gpu_id 0 --mode func --heads 4 --network yeo7 --run_name gps_s3_ppmi_func_yeo7
+set cmds[8]=python -u polished/main.py --dataset ppmi --seed 4 --n_folds 10 --epochs 300 --patience 100 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.7 --model gps --gpu_id 0 --mode func --heads 4 --network yeo7 --run_name gps_s4_ppmi_func_yeo7
+
+
 
 
 
@@ -31,10 +32,10 @@ set cmds[9]=python -u polished/main.py --dataset ppmi --seed 4 --n_folds 10 --ep
 
 
 rem Number of commands to run at a time
-set max_parallel=3
+set max_parallel=1
 
 rem Total number of commands
-set total_cmds=10
+set total_cmds=9
 
 set /a current_cmd=0
 

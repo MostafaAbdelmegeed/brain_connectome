@@ -5,10 +5,12 @@ import datetime
 from torch.utils.tensorboard import SummaryWriter
 from sklearn.metrics import f1_score, precision_score, confusion_matrix
 import torch.nn as nn
+from torch_geometric.nn import summary
 import torch.nn.functional as F
 from sklearn.model_selection import StratifiedKFold
 from torch_geometric.loader import DataLoader
 from dataset import Dataset_PPMI, PPMIAsymmetryDataset, ADNIAsymmetryDataset, Dataset_ADNI
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from torch.utils.data import Subset
 
@@ -153,7 +155,9 @@ def train(args, device):
         val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False, generator=generator)
 
         model = get_model(args).to(device)
+        
         optimizer = torch.optim.Adam(model.parameters(), weight_decay=5e-4, lr=learning_rate)
+
 
         print_with_timestamp(f"Epoch/Loss\t||\tTraining\t|\tValidation\t")
         criterion = torch.nn.CrossEntropyLoss().to(device)
@@ -246,6 +250,7 @@ def train(args, device):
                 best_val_f1 = val_f1
                 best_val_precision = val_precision
                 best_confusion_matrix = conf_matrix
+            
 
         
         print_with_timestamp(f"Fold {fold +1} Best Validation Loss: {best_val_loss:.4f}")

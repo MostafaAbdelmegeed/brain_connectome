@@ -5,6 +5,7 @@ from train import *
 import argparse
 import torch
 import numpy as np
+import random
 
 # python -u polished/main.py --dataset ppmi --seed 0 --n_folds 2 --epochs 5 --patience 5 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.3 --heads 1 --test_size 0.1 --percentile 0.9 --model gin --gpu_id 0 
 def print_with_timestamp(message):
@@ -50,12 +51,15 @@ def main():
     seed = args.seed
     np.random.seed(seed)
     torch.manual_seed(seed)
+    random.seed(seed)
     torch.set_printoptions(threshold=torch.inf)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
         device = torch.device('cuda:{}'.format(args.gpu_id))
         # torch.set_default_device(device)
     torch.autograd.set_detect_anomaly(True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     train(args, device)
 
 if __name__ == "__main__":
