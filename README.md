@@ -174,5 +174,5 @@ This project is licensed under the MIT License. See the `LICENSE` file for detai
 
 For questions or collaborations:
 
-- **Email**: your-email@example.com
-- **GitHub**: [Your GitHub Profile](https://github.com/your-profile)
+- **Email**: mostafa0as3d@gmail.com
+- **GitHub**: [Your GitHub Profile](https://github.com/MostafaAbdelmegeed)
