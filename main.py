@@ -1,13 +1,13 @@
 from dataset import *
 from models import *
-from encoding import *
+from networks import *
 from train import *
 import argparse
 import torch
 import numpy as np
 import random
 
-# python -u polished/main.py --dataset ppmi --seed 0 --n_folds 2 --epochs 5 --patience 5 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.3 --heads 1 --test_size 0.1 --percentile 0.9 --model gin --gpu_id 0 
+# python -u main.py --dataset ppmi --seed 0 --n_folds 10 --epochs 300 --patience 50 --batch_size 64 --learning_rate 0.0001 --hidden_dim 1024 --n_layers 2 --dropout 0.7 --heads 1 --test_size 0.1 --percentile 0.9 --model gin --gpu_id 0
 def print_with_timestamp(message):
     timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     print(f"{timestamp}\t{message}")
@@ -28,9 +28,6 @@ def parse_args():
     parser.add_argument('--patience', type=int, default=10, help='Patience for early stopping')
     parser.add_argument('--test_size', type=float, default=0.2, help='Test size for splitting data')
     parser.add_argument('--percentile', type=float, default=0.9, help='Percentile for thresholding')
-    parser.add_argument('--augmented', action='store_true', help='Use augmented data')
-    parser.add_argument('--augment_validation', action='store_true', help='Augment validation data')
-    parser.add_argument('--span', type=float, default=0.02, help='Span for augmented data')
     parser.add_argument('--model', type=str, default='gin', help='Model name')
     parser.add_argument('--vanilla', action='store_true', help='Use vanilla dataset')
     parser.add_argument('--exp_code', type=str, default='-', help='Experiment code')
@@ -39,8 +36,11 @@ def parse_args():
     parser.add_argument('--in_channels', type=int, default=1, help='Input channel size')
     parser.add_argument('--mgnn', action='store_true', help='Use MGNN')
     parser.add_argument('--num_classes', type=int, default=4, help='Number of classes')
-    parser.add_argument('--mode', type=str, default='corr', help='Mode', choices=['corr', 'asym', 'func', 'all'])
+    parser.add_argument('--mode', type=str, default='vanilla', help='Mode', choices=['vanilla', 'function', 'both'])
     parser.add_argument('--network', type=str, default='yeo7', help='Network', choices=['yeo17', 'yeo7'])
+    parser.add_argument('--include_asymmetry', action='store_true', help='Include asymmetry')
+    parser.add_argument('--use_edges', action='store_true', help='Use edge features')
+    parser.add_argument('--include_connection_type', action='store_true', help='Use node features')
     return parser.parse_args()
 
 

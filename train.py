@@ -9,10 +9,12 @@ from torch_geometric.nn import summary
 import torch.nn.functional as F
 from sklearn.model_selection import StratifiedKFold
 from torch_geometric.loader import DataLoader
-from dataset import Dataset_PPMI, PPMIAsymmetryDataset, ADNIAsymmetryDataset, Dataset_ADNI
+from dataset import Dataset_PPMI, Dataset_ADNI
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from torch.utils.data import Subset
+
+from scipy.stats import entropy
 
 # from dataset import collate_function
 from models import get_model
@@ -21,11 +23,24 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 import PIL.Image
 
-from preprocessing import process
-
 def print_with_timestamp(message):
     timestamp = datetime.datetime.now().strftime("[%Y-%m-%d %H:%M:%S]")
     print(f"{timestamp}\t{message}")
+
+    
+
+def calculate_confusion_entropy(avg_conf_matrix):
+    # Step 1: Normalize the averaged confusion matrix
+    avg_conf_matrix = avg_conf_matrix.astype(np.float32)  # Ensure float division
+    avg_conf_matrix_normalized = avg_conf_matrix / avg_conf_matrix.sum()  # Divide by the total count
+    
+    # Step 2: Flatten and remove zero entries
+    cm_flat = avg_conf_matrix_normalized.flatten()
+    cm_flat = cm_flat[cm_flat > 0]  # Filter out zero values to avoid log(0)
+    
+    # Step 3: Calculate entropy
+    conf_entropy = entropy(cm_flat, base=2)  # Using base-2 for interpretability
+    return conf_entropy
 
 def plot_confusion_matrix(cm, class_names):
     figure = plt.figure(figsize=(8, 8))
@@ -122,15 +137,16 @@ def train(args, device):
     # Initialize lists to store metrics for all folds
     all_fold_metrics = {'accuracy': [], 'precision': [], 'f1': [], 'conf_matrix':[], 'val_loss': [], 'weights': []}
 
-    if args.mode == 'corr' or args.mode == 'func':
-        dataset = Dataset_PPMI('data/PPMI') if args.dataset == 'ppmi' else Dataset_ADNI('data/ADNI/AAL90', 'data/ADNI/label-2cls_new.csv', args.num_classes)
-    elif args.mode == 'asym' or args.mode == 'all':
-        dataset = PPMIAsymmetryDataset('data/PPMI') if args.dataset == 'ppmi' else ADNIAsymmetryDataset('data/ADNI/AAL90', 'data/ADNI/label-2cls_new.csv', args.num_classes)
+    dataset = Dataset_PPMI('data/PPMI') if args.dataset == 'ppmi' else Dataset_ADNI('data/ADNI/AAL90', 'data/ADNI/label-2cls_new.csv', args.num_classes)
+    # if args.mode == 'corr' or args.mode == 'func':
+    #     dataset = Dataset_PPMI('data/PPMI') if args.dataset == 'ppmi' else Dataset_ADNI('data/ADNI/AAL90', 'data/ADNI/label-2cls_new.csv', args.num_classes)
+    # elif args.mode == 'asym' or args.mode == 'all':
+    #     dataset = PPMIAsymmetryDataset('data/PPMI') if args.dataset == 'ppmi' else ADNIAsymmetryDataset('data/ADNI/AAL90', 'data/ADNI/label-2cls_new.csv', args.num_classes)
     # Get the current timestamp
     timestamp = datetime.datetime.now().strftime("%m-%d-%H-%M-%S")
     # TensorBoard writer
-    run_name = args.run_name if args.run_name else f'{model_name}_{args.exp_code}_{args.dataset}_s{seed}_f{n_folds}_e{epochs}_bs{batch_size}_lr{learning_rate}_hd{hidden_dim}_d{dropout}_h{heads}_l{n_layers}_a{args.augmented}_{timestamp}'
-    writer = SummaryWriter(log_dir=f'polished/runs/{run_name}')
+    run_name = args.run_name if args.run_name else f'{args.dataset}_{model_name}_{timestamp}'
+    writer = SummaryWriter(log_dir=f'polished/new_runs/{run_name}_h{hidden_dim}_l{n_layers}_d{dropout}_s{seed}')
     writer.add_text('Arguments', str(args))
 
     generator = torch.Generator().manual_seed(seed)
@@ -204,7 +220,6 @@ def train(args, device):
             val_preds = []
             val_labels = []
             interpretable_weights= []
-            
             with torch.no_grad():
                 for data in val_loader:
                     data = data.to(device)
@@ -255,6 +270,10 @@ def train(args, device):
         
         print_with_timestamp(f"Fold {fold +1} Best Validation Loss: {best_val_loss:.4f}")
         print_with_timestamp(f"Fold {fold +1} Best Metrics: Accuracy: {best_val_acc:.4f}, Precision: {best_val_precision:.4f}, F1 Score: {best_val_f1:.4f}")
+        writer.add_scalar(f'Fold_{fold+1}/Metrics/Best_Val_Loss', best_val_loss)
+        writer.add_scalar(f'Fold_{fold+1}/Metrics/Best_Val_Accuracy', best_val_acc)
+        writer.add_scalar(f'Fold_{fold+1}/Metrics/Best_Val_F1', best_val_f1)
+        writer.add_scalar(f'Fold_{fold+1}/Metrics/Best_Val_Precision', best_val_precision)
         best_conf_matrix_str = np.array2string(best_confusion_matrix, separator=' ', max_line_width=np.inf).replace('\n', ' ')
         print_with_timestamp(f"Fold {fold +1} Best Confusion Matrix: {best_conf_matrix_str}")
 
@@ -283,15 +302,24 @@ def train(args, device):
 
     print_with_timestamp("Training completed.")
     print_with_timestamp(f"Final Metrics | Accuracy: {final_accuracy:.4f} | Precision: {final_precision:.4f} | F1 Score: {final_f1:.4f}")
+    writer.add_scalar('Final_Metrics/accuracy', final_accuracy)
+    writer.add_scalar('Final_Metrics/precision', final_precision)
+    writer.add_scalar('Final_Metrics/f1', final_f1)
+
+    writer.add_scalar('Final_Metrics/val_loss', avg_val_loss)
 
     # Print the average confusion matrix
     avg_conf_matrix = np.mean(all_fold_metrics['conf_matrix'], axis=0)
+    avg_conf_entropy = calculate_confusion_entropy(avg_conf_matrix)
+    print_with_timestamp(f"Average Confusion Matrix Entropy: {avg_conf_entropy:.4f}")
     avg_conf_matrix_str = np.array2string(avg_conf_matrix, separator=' ', max_line_width=np.inf).replace('\n', ' ')
     print_with_timestamp(f"Final Confusion Matrix: {avg_conf_matrix_str}")
 
+    writer.add_scalar('Final_Metrics/entropy', avg_conf_entropy)
+
 
     final_weights = torch.stack(all_fold_metrics['weights']).mean(dim=0)
-    print_with_timestamp(f"Final Weights: {final_weights}")
+    # print_with_timestamp(f"Final Weights: {final_weights}")
     # Define class names based on your specific classes
     if args.dataset == 'ppmi':
         class_names = ['Control', 'Prodromal', 'Patient', 'Swedd']

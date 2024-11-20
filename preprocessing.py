@@ -56,14 +56,10 @@ def add_structural_features(edge_index, edge_attr):
     return edge_attr
 
 
-def pearson_dataset(data, label, sparsity, mgnn=False):
+def pearson_dataset(data, label, sparsity):
     adjacency_matrix = preprocess_adjacency_matrix(data, sparsity)
     edge_index = adjacency_matrix[0]
     edge_attr = adjacency_matrix[1].float()
-    if mgnn:
-        moment_attrs = add_attributes2(edge_index, 10)
-        data = Data(x=torch.cat((data,moment_attrs), dim=1).float(), edge_index=edge_index, edge_attr=edge_attr, y=torch.tensor(label))
-        return data
     data = Data(x=data.float(), edge_index=edge_index, edge_attr=edge_attr, y=torch.tensor(label))
     return data
 
