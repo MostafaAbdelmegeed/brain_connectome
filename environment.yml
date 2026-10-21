@@ -17,4 +17,3 @@ dependencies:
   - scikit-learn
   - scipy
   - tensorboard
-prefix: C:\Users\mosta\miniconda3\envs\clean_brain
