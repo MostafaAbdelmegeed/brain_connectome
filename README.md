@@ -1,172 +1,89 @@
-# Brain Connectivity Graph Classification with GNNs
+# Brain connectivity classification with graph neural networks
 
-This repository provides a framework for classifying brain connectivity graphs derived from the PPMI and ADNI datasets. It utilizes Graph Neural Networks (GNNs) with a focus on incorporating domain-specific knowledge for analyzing functional connectivity matrices.
+Research code for classifying functional brain connectivity graphs from PPMI and ADNI fMRI data. The models combine connectivity with brain context: functional groups, hemisphere information, and optional asymmetry features.
 
----
+The implementation includes GIN, GCN, GAT, GPS, and MLP variants in PyTorch and PyTorch Geometric.
 
-## Features
+## Research context
 
-- **Dataset Handling**:
-  - PPMI and ADNI datasets for neurodegenerative disease classification.
-  - Functional connectivity graphs constructed from BOLD fMRI signals.
-- **Graph Neural Networks**:
+- [Functional-Positional Context Embedding in Graph Neural Networks for Improved Parkinson's Disease Diagnosis](https://doi.org/10.1109/ISBI60581.2025.10980965), IEEE ISBI 2025.
+- [Edge-Boosted Graph Learning for Functional Brain Connectivity Analysis](https://arxiv.org/abs/2504.14796), IEEE ISBI 2025.
 
-  - Models include GIN, GCN, GAT, GPS, and MLP variants.
-  - Support for advanced features like edge attributes and functional embeddings.
+This repository provides the brain connectivity framework. The papers describe their specific experiments; the repository does not include the source datasets, trained checkpoints, or an archived run reproducing every published result.
 
-- **Custom Brain Context Layer**:
+## How the code is organized
 
-  - Includes embeddings for functional groups, hemispheric information, and asymmetry features.
+| File | Responsibility |
+| :--- | :--- |
+| [dataset.py](dataset.py) | Read preprocessed subject time series and construct correlation graphs |
+| [preprocessing.py](preprocessing.py) | Threshold connectivity and construct graph attributes |
+| [networks.py](networks.py) | Define functional network groups |
+| [models.py](models.py) | Brain context layer and model variants |
+| [train.py](train.py) | Cross-validation, training, evaluation, and logging |
+| [main.py](main.py) | Command-line experiment settings |
 
-- **Cross-Validation**:
-  - Built-in support for cross-validation and stratified data splits.
-  - Logging and visualization using TensorBoard.
-
----
-
-## Repository Structure
-
-```
-.
-├── dataset.py          # Dataset loading and preprocessing for PPMI and ADNI
-├── main.py             # Entry point for training and evaluation
-├── models.py           # Implementation of GNN-based models
-├── networks.py         # Functional group definitions (Yeo networks)
-├── preprocessing.py    # Preprocessing utilities for adjacency matrices and edge features
-├── train.py            # Training pipeline with metrics and TensorBoard integration
-```
-
----
-
-## Getting Started
-
-### Prerequisites
-
-Ensure you have the following installed:
-
-- Python 3.8+
-- PyTorch and PyTorch Geometric
-- Required Python libraries (`numpy`, `scipy`, `pandas`, `sklearn`, etc.)
-
-To set up the environment, use:
+## Setup
 
 ```bash
+git clone https://github.com/MostafaAbdelmegeed/brain_connectome.git
+cd brain_connectome
 conda env create -f environment.yml
-conda activate brain-gnn
+conda activate clean_brain
 ```
 
-### Installation
+The environment file lists the dependencies; it is not a version-locked snapshot of the paper experiments. Select a PyTorch build compatible with your machine if Conda needs a different CPU/CUDA configuration.
 
-Clone this repository:
+## Input data
 
-```bash
-git clone https://github.com/your-repo-url/brain-connectivity-gnn.git
-cd brain-connectivity-gnn
+The loaders expect **preprocessed region time series**, rather than raw MRI scans. Obtain access to the datasets through [PPMI](https://www.ppmi-info.org/access-data-specimens/download-data) or [ADNI](https://adni.loni.usc.edu/data-samples/adni-data/) and follow their data-use requirements.
+
+```text
+data/
+  PPMI/
+    control/
+      subject_AAL116_features_timeseries.mat
+    patient/
+      subject_AAL116_features_timeseries.mat
+    prodromal/
+      ...
+    swedd/
+      ...
+  ADNI/
+    AAL90/
+      sub_<subject_id>_...
+    label-2cls_new.csv
 ```
 
----
+PPMI MATLAB files need a `data` array with time points by regions. Their parent directory names determine the labels: `control`, `patient`, `prodromal`, and `swedd`. ADNI time-series files are read with `numpy.loadtxt`; the CSV needs `subject_id` and `DX` columns. See the loaders for the class mappings.
 
-## Usage
+## Run an experiment
 
-### Data Preparation
-
-Ensure your dataset is organized as follows:
-
-- **PPMI Dataset**:
-  ```
-  data/
-  └── PPMI/
-      ├── sub_<id>_AAL116_features_timeseries.mat
-      ├── ...
-  ```
-- **ADNI Dataset**:
-  ```
-  data/
-  └── ADNI/
-      ├── AAL90/
-      ├── label-2cls_new.csv
-      ├── ...
-  ```
-
-### Training
-
-To train a GNN model on the PPMI dataset:
+Run commands from the repository root. For example:
 
 ```bash
 python main.py --dataset ppmi --model gin --seed 0 --n_folds 10 --epochs 300 --batch_size 64 --learning_rate 0.0001
 ```
 
-Key arguments:
+For functional and hemisphere context, select the relevant mode and network:
 
-- `--model`: Model to use (`gin`, `gcn`, `gat`, `gps`, `mlp`).
-- `--dataset`: Dataset to train on (`ppmi`, `adni`).
-- `--include_asymmetry`: Include asymmetry features.
-- `--use_edges`: Use edge attributes.
-- `--hidden_dim`: Hidden layer dimensions.
-- `--dropout`: Dropout rate.
+```bash
+python main.py --dataset ppmi --model gin --mode both --network yeo7 --include_asymmetry
+```
 
-Check `main.py` for all configurable arguments.
+ADNI supports two- or four-class mappings. Select the class count explicitly:
 
----
+```bash
+python main.py --dataset adni --model gin --num_classes 2
+```
 
-## Functional Networks
+Use `python main.py --help` for the remaining settings, including graph variants, edge attributes, sparsity, dropout, and attention heads. Models and context options differ; check [get_model](models.py) when combining flags.
 
-### Yeo 7 and 17 Networks
+## Evaluation
 
-Functional groups derived from Yeo 7 and 17 parcellations:
-
-- Visual, Somatomotor, Limbic, Default Mode, and more.
-- Automatically computed and assigned to brain regions.
-
----
-
-## Results and Metrics
-
-The framework evaluates models with:
-
-- **Accuracy**
-- **Precision**
-- **F1-Score**
-- **Confusion Matrix Entropy**
-
-TensorBoard is used for visualization:
+The training loop uses stratified folds and records accuracy, precision, F1, and confusion matrices. Compare models with the same subject inputs, class mapping, split settings, and seed. Inspect the logged runs before drawing conclusions from a single score.
 
 ```bash
 tensorboard --logdir polished/new_runs/
 ```
 
----
-
-## Examples
-
-### Sample Training Command
-
-```bash
-python main.py --dataset adni --model gps --n_layers 3 --dropout 0.5 --heads 4 --epochs 200
-```
-
-### Sample TensorBoard Output
-
-- View metrics like loss, accuracy, and F1-score for each fold.
-- Inspect the confusion matrix and interpret model attention weights.
-
----
-
-## Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository.
-2. Create a feature branch (`git checkout -b feature-name`).
-3. Commit your changes (`git commit -m "Add feature"`).
-4. Push to the branch (`git push origin feature-name`).
-5. Open a Pull Request.
-
----
-
-## Contact
-
-For questions or collaborations:
-
-- **Email**: mostafa0as3d@gmail.com
-- **GitHub**: [Your GitHub Profile](https://github.com/MostafaAbdelmegeed)
+For questions about the implementation: [mostafa0as3d@gmail.com](mailto:mostafa0as3d@gmail.com).
